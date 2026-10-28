@@ -82,7 +82,7 @@ function seat(url, name) {
 }
 
 // ---------- 0. 不联机：跟以前一样，不开局域网 ----------
-const r0 = await A.run('riichi_open', { confirmed: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼' })
+const r0 = await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',owner_plays: true, owner_name: '小主', my_name: '肥鱼' })
 assert.ok(!r0.includes('联机房'), r0)
 const own0 = linkOf(r0, /http:\/\/127\.0\.0\.1:\d+\/room\/\w+\/\?t=[\w-]+/)
 const port0 = own0.port
@@ -93,14 +93,14 @@ console.log('0. 不联机：局域网地址上都连不上 ✓')
 // ---------- 1. 联机房：A 开房，B 用 riichi_join 入座，打完一个东风战 ----------
 if (!autoOk) {
   // 没有虚拟局域网网卡时，auto 不悄悄开到所有网卡上，而是报错让主人明说
-  const refused = await A.run('riichi_open', { confirmed: true, online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true })
+  const refused = await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true })
   assert.ok(refused.startsWith('没开成：没找到 UU 云联机这类虚拟局域网的网卡') && refused.includes(addrs[0].address), refused)
   for (const a of addrs) assert.equal(await reachable(`http://${a.address}:${port0}/`), false, 'auto 被拒时不能开着局域网监听')
   const still = await req(`${own0.origin}/room/${code0}/seat/state`, { token: own0.searchParams.get('t') })
   assert.equal(still.body.room.status, 'lobby', '网卡选错被退回时，正在打的那一桌不能被结束')
   console.log('0b. 没有 UU 网卡时 auto 拒绝、不开监听 ✓')
 }
-const r1 = await A.run('riichi_open', { confirmed: true, online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: LAN_IP })
+const r1 = await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: LAN_IP })
 console.log(r1)
 assert.ok(r1.includes('这是联机房') && r1.includes('留给别人的座位：2 个') && r1.includes('联机说明.md'), r1)
 assert.ok(r1.includes('你的主人坐 1 号座位，现在桌上叫「小主」'), r1)
@@ -115,21 +115,21 @@ console.log('联机地址', lanOrigin, '房间码', code1)
 assert.equal((await fetch(`${lanOrigin}/debug?k=${debugKey}`)).status, 404, '调试页不对局域网开放（钥匙对也不行）')
 assert.equal((await fetch(`${lanOrigin}/room/${code0}/`)).status, 404, '不联机的房间从局域网看不到')
 assert.equal((await fetch(`${own1.origin}/room/${code0}/`)).status, 200, '本机那一路照常能看')
-assert.ok((await B.run('riichi_join', { confirmed: true, address: lanOrigin, code: 'ZZZZZZ', my_name: '鱼丸', owner_name: '阿明' })).includes('没有房间 ZZZZZZ'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin, code: 'ZZZZZZ', my_name: '鱼丸', owner_name: '阿明' })).includes('没有房间 ZZZZZZ'))
 // 闸门：没确认、地址乱写、房间码格式不对、昵称没确认
 assert.ok((await B.run('riichi_join', { address: lanOrigin, code: code1 })).startsWith('还没入座。先把这几项列给主人确认'))
-assert.ok((await B.run('riichi_join', { confirmed: true, address: 'ftp://x', code: code1, my_name: '鱼丸', owner_name: '阿明' })).includes('牌桌地址看不懂'))
-assert.ok((await B.run('riichi_join', { confirmed: true, address: lanOrigin, code: 'O0O0', my_name: '鱼丸', owner_name: '阿明' })).includes('房间码不对'))
-assert.ok((await B.run('riichi_join', { confirmed: true, address: lanOrigin, code: code1, my_name: '鱼丸' })).includes('主人在桌上的昵称（owner_name）'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: 'ftp://x', code: code1, my_name: '鱼丸', owner_name: '阿明' })).includes('牌桌地址看不懂'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin, code: 'O0O0', my_name: '鱼丸', owner_name: '阿明' })).includes('房间码不对'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin, code: code1, my_name: '鱼丸' })).includes('主人在桌上的昵称（owner_name）'))
 
-const j1 = await B.run('riichi_join', { confirmed: true, address: lanOrigin.replace('http://', ''), code: code1.toLowerCase(), my_name: '鱼丸', owner_name: '阿明', owner_color: '#7fdc8f' })
+const j1 = await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin.replace('http://', ''), code: code1.toLowerCase(), my_name: '鱼丸', owner_name: '阿明', owner_color: '#7fdc8f' })
 console.log(j1)
 assert.ok(j1.includes('入座了') && j1.includes('坐 2 号座位'), j1)
 assert.ok(j1.includes('你的主人坐 3 号座位，现在桌上叫「阿明」') && j1.includes('公开标成一家'), j1)
 assert.ok(j1.includes('fake/fake-B'), '她出牌用的是她自己 DSH 里的模型')
 const bOwn = linkOf(j1, /http:\/\/[\d.]+:\d+\/room\/\w+\/\?t=[\w-]+/)
 assert.equal(bOwn.origin, lanOrigin, '朋友主人的链接走房主的局域网地址')
-assert.ok((await B.run('riichi_join', { confirmed: true, address: lanOrigin, code: code1, my_name: '鱼丸', owner_name: '阿明' })).includes('你已经坐在房间'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin, code: code1, my_name: '鱼丸', owner_name: '阿明' })).includes('你已经坐在房间'))
 
 // 一家：公开标注，所有座位看到的一样
 const famWant = [{ n: 1, members: [0, 1], names: ['肥鱼', '小主'] }, { n: 2, members: [2, 3], names: ['鱼丸', '阿明'] }]
@@ -203,14 +203,14 @@ assert.equal(await reachable(`${own1.origin}/`), true, '本机那一路照常')
 console.log('1c. 散场后局域网监听关了 ✓')
 
 // ---------- 2. 冒充、旁观、限流、房主结束 ----------
-const r2 = await A.run('riichi_open', { confirmed: true, online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: LAN_IP })
+const r2 = await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: LAN_IP })
 const code2 = r2.match(/房间码 (\w{6})/)[1]
 const own2 = linkOf(r2, /http:\/\/127\.0\.0\.1:\d+\/room\/\w+\/\?t=[\w-]+/)
 assert.equal(r2.match(/牌桌地址 (http:\/\/[\d.]+:\d+)/)[1], lanOrigin)
 A.sent.length = 0
 B.sent.length = 0
 // 朋友的主人这次不上桌：拿旁观她视角的链接
-const j2 = await B.run('riichi_join', { confirmed: true, address: lanOrigin, code: code2, my_name: '鱼丸', owner_plays: false })
+const j2 = await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lanOrigin, code: code2, my_name: '鱼丸', owner_plays: false })
 assert.ok(j2.includes('旁观你视角的链接') && !j2.includes('你的主人坐'), j2)
 const watchUrl = linkOf(j2, /http:\/\/[\d.]+:\d+\/room\/\w+\/\?w=[\w-]+/)
 // 旁观的人也看得到一家（这次只有房主那一家）
@@ -262,18 +262,18 @@ assert.equal(await reachable(`${lanOrigin}/`), false)
 console.log('2c. 房主结束对局，朋友那边收到；局域网监听关了 ✓')
 
 // ---------- 3. 朋友中途不打了（riichi_close = 离桌）；插件卸载时关掉局域网监听 ----------
-const r3 = await A.run('riichi_open', { confirmed: true, online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: 'all' })
+const r3 = await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',online: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, lan_ip: 'all' })
 assert.ok(r3.includes('局域网监听开在所有网卡上'), r3)
 const code3 = r3.match(/房间码 (\w{6})/)[1]
 const own3 = linkOf(r3, /http:\/\/127\.0\.0\.1:\d+\/room\/\w+\/\?t=[\w-]+/)
 const lan3 = r3.match(/牌桌地址 (http:\/\/[\d.]+:\d+)/)[1]
-assert.ok((await B.run('riichi_join', { confirmed: true, address: lan3, code: code3, my_name: '鱼丸', owner_name: '阿明' })).includes('入座了'))
+assert.ok((await B.run('riichi_join', { confirmed: true, seat_mode: 'plugin',address: lan3, code: code3, my_name: '鱼丸', owner_name: '阿明' })).includes('入座了'))
 const left = await B.run('riichi_close', {})
 assert.ok(left.includes('已经替你和主人离开了房间') && left.includes('结束不了整桌'), left)
 const lob = (await req(`${own3.origin}/room/${code3}/seat/state`, { token: own3.searchParams.get('t') })).body.lobby
 assert.deepEqual(lob.seats.slice(2).map((s) => [s.claimed, s.kind, s.family]), [[false, 'remote', null], [false, 'remote', null]], '两个座位都空出来了')
 assert.deepEqual(lob.families.map((f) => f.members), [[0, 1]], '朋友那一家拆掉了')
-assert.ok((await A.run('riichi_open', { confirmed: true, online: true, lan_ip: '10.255.255.254', owner_plays: false, my_name: '肥鱼', replace: true })).includes('这台电脑没有 10.255.255.254'))
+assert.ok((await A.run('riichi_open', { confirmed: true, seat_mode: 'plugin',online: true, lan_ip: '10.255.255.254', owner_plays: false, my_name: '肥鱼', replace: true })).includes('这台电脑没有 10.255.255.254'))
 A.unload()
 B.unload()
 await wait(200)

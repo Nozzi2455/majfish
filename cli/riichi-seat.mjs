@@ -8,8 +8,12 @@ import path from 'node:path'
 const HELP = `用法：
   node riichi-seat.mjs join <牌桌地址> <房间码> [--name 昵称] [--color "#RRGGBB"]
       入座并准备。地址和房间码由开桌的人给（形如 http://127.0.0.1:47777 ABC123）。
-  node riichi-seat.mjs wait [--timeout 秒]
+  node riichi-seat.mjs join <牌桌地址> <房间码> --token <座位令牌>
+      坐一个给你留好的座位（DSH 的肥鱼派子代理坐她自己的座位时用；令牌由插件给，昵称和颜色已经定好）。
+  node riichi-seat.mjs wait [--timeout 秒] [--chat-gap 秒]
       一直等到轮到你（或者这一桌结束），然后打印牌面、可选操作和上次看过之后的新聊天，退出。默认最多等 600 秒。
+      还没轮到你、但桌上有别人说话时也会返回（攒 3 秒一起打印），你可以用 say 回话，然后再 wait。
+      两次因为聊天返回之间至少隔 --chat-gap 秒（默认 10；0 = 不因为聊天返回）。轮到你时永远马上返回，不受这个间隔限制。
   node riichi-seat.mjs act <编号> [台词]
       选一个编号出牌；台词可选，会进桌上聊天（全桌都看得到）。
   node riichi-seat.mjs say <话>
@@ -18,7 +22,7 @@ const HELP = `用法：
       看一眼现在的牌面和桌上最近的全部聊天，不等。
   node riichi-seat.mjs leave
       离桌。之后你的座位由机器人接着打到底（桌上会说一次）；还在大厅的话座位空出来。
-常用循环：wait → 想 → act <编号> "台词" → wait → ……，直到 wait 打印“这一桌结束了”。
+常用循环：wait → 轮到你就想好 act <编号> "台词"；只是有人说话就看看要不要 say → wait → ……，直到 wait 打印“这一桌结束了”。
 轮到你以后 5 分钟没动静，算你掉线：之后由机器人代打，再 wait 就接回座位（房间设了限时就按限时代打那一手）。`
 
 // ---------- 参数和状态文件 ----------
@@ -32,10 +36,20 @@ for (let i = 0; i < argv.length; i++) {
 const [cmd, ...args] = rest
 const STATE = path.resolve(flags.state || '.riichi-seat.json')
 
+// 聊天叫醒（10-29 主人定）：wait 期间别人说话（不算自己、不算系统消息）也让 wait 返回，坐在桌上的 agent 能及时回话。
+// 攒 debounceSec 秒一起打印；两次因聊天返回之间至少隔 gapSec 秒（--chat-gap，0 = 不因聊天返回）。
+// 间隔按状态文件里的 chatWokeAt 算，跨好几次 wait 也有效。轮到你时永远马上返回，既不受这个间隔限制，也不改 chatWokeAt。
+const CHAT_WAKE = { debounceSec: 3, gapSec: 10 }
+const secFlag = (v, dflt) => { const n = Number(v); return v !== undefined && Number.isFinite(n) && n >= 0 ? n : dflt }
+
 function load() {
   try { return JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { die(`还没入座（找不到 ${STATE}）。先 join。`) }
 }
 function save(st) { try { fs.writeFileSync(STATE, JSON.stringify(st, null, 2)) } catch {} }
+function create(st) {
+  fs.mkdirSync(path.dirname(STATE), { recursive: true })
+  fs.writeFileSync(STATE, JSON.stringify(st, null, 2))
+}
 function die(msg, code = 1) { console.log(msg); process.exit(code) }
 
 async function call(st, method, p, body) {
@@ -154,6 +168,21 @@ async function main() {
   if (cmd === 'join') {
     const [origin, code] = args
     if (!origin || !code) die('要：join <牌桌地址> <房间码>')
+    if (flags.token) {
+      // 留好的座位：拿令牌接座（不领空座）。老版本的牌桌没有 attach，就直接准备
+      const st = { origin: origin.replace(/\/$/, ''), code: code.toUpperCase(), token: flags.token }
+      const a = await call(st, 'POST', 'seat/attach', {})
+      if (a.status !== 200 && !(a.status === 404 && a.body.error === 'not found')) die(`入座失败（${a.status}）：${a.body.error || ''}`)
+      const s = await call(st, 'GET', 'seat/state')
+      if (s.status !== 200) die(`入座失败（${s.status}）：${s.body.error || ''}`)
+      const me = s.body.view?.seats?.find((x) => x.me)
+      Object.assign(st, { seat: a.body.seat ?? me?.id ?? null, name: a.body.name ?? me?.name ?? null })
+      create(st)
+      const ready = s.body.room.status === 'lobby' ? await call(st, 'POST', 'seat/ready', { ready: true }) : { status: 200 }
+      console.log(`入座了：座位 ${st.seat ?? '?'}，昵称 ${st.name ?? '?'}${a.body.color ? `，颜色 ${a.body.color}` : ''}。${ready.status === 200 ? (s.body.room.status === 'lobby' ? '已准备。' : '已经开局了，接着打。') : `准备失败：${ready.body.error || ready.status}`}`)
+      console.log('令牌存在 ' + STATE + '（别发给别人）。接下来：wait。')
+      return
+    }
     const r = await fetch(`${origin.replace(/\/$/, '')}/room/${code.toUpperCase()}/join`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: flags.name, color: flags.color, mode: 'poll' }),
@@ -161,7 +190,7 @@ async function main() {
     const d = await r.json().catch(() => ({}))
     if (!r.ok) die(`入座失败（${r.status}）：${d.error || ''}`)
     const st = { origin: origin.replace(/\/$/, ''), code: code.toUpperCase(), token: d.token, seat: d.seat, name: d.name }
-    fs.writeFileSync(STATE, JSON.stringify(st, null, 2))
+    create(st)
     const ready = await call(st, 'POST', 'seat/ready', { ready: true })
     console.log(`入座了：座位 ${d.seat}，昵称 ${d.name}，颜色 ${d.color}${d.warning ? `（${d.warning}，用了默认名字）` : ''}。${ready.status === 200 ? '已准备。' : `准备失败：${ready.body.error || ready.status}`}`)
     console.log('令牌存在 ' + STATE + '（别发给别人）。接下来：wait。')
@@ -214,10 +243,28 @@ async function main() {
 
   if (cmd === 'wait') {
     const timeout = +(flags.timeout || 600) * 1000
+    const gapMs = secFlag(flags['chat-gap'], CHAT_WAKE.gapSec) * 1000
+    const debounceMs = secFlag(flags['chat-debounce'], CHAT_WAKE.debounceSec) * 1000
     const ctrl = new AbortController()
     // 不用 process.exit：Windows 上事件流还开着时直接退出，Node 会崩（UV_HANDLE_CLOSING），先断流再自然退出
-    let chat = [], view = null
-    const timer = setTimeout(() => { printChat(st, chat, { onlyNew: true }); console.log('还没轮到你（等超时了）。再 wait 一次。'); ctrl.abort() }, timeout)
+    let chat = [], view = null, chatTimer = null
+    const timer = setTimeout(() => { clearTimeout(chatTimer); printChat(st, chat, { onlyNew: true }); console.log('还没轮到你（等超时了）。再 wait 一次。'); ctrl.abort() }, timeout)
+    // 别人说的、还没看过的话（自己的、系统消息不算）
+    const mine = (c) => (st.seat != null ? c.from === st.seat : c.name === st.name)
+    const othersNew = (c) => c.from >= 0 && !mine(c) && (c.n || 0) > (st.chatSeen || 0)
+    const wakeOnChat = () => {
+      if (gapMs <= 0 || chatTimer) return
+      const now = Date.now()
+      const at = Math.max(now + debounceMs, (st.chatWokeAt || 0) + gapMs)
+      chatTimer = setTimeout(() => {
+        clearTimeout(timer)
+        st.chatWokeAt = Date.now()
+        printChat(st, chat, { onlyNew: true })
+        save(st)
+        console.log('还没轮到你。桌上有人说话了：想回就用 say 回一句，回不回你自己定；然后再 wait。')
+        ctrl.abort()
+      }, at - now)
+    }
     await listen(st, (type, d) => {
       if (type === 'sync') {
         chat = d.chat || []
@@ -225,8 +272,10 @@ async function main() {
         if (d.left) { console.log('你已经离桌了，这一桌由机器人接着打。'); return true }
         if (d.room.status === 'ended' || d.room.status === 'aborted') { printChat(st, chat, { onlyNew: true }); printEnd(d.room); return true }
         if (d.decision && view?.phase === 'playing') { printTurn(st, view, d.decision, chat); return true }
+        if (chat.some(othersNew)) wakeOnChat()
       } else if (type === 'chat') {
         chat.push(d)
+        if (othersNew(d)) wakeOnChat()
       } else if (type === 'msg') {
         view = d.view
         if (d.decision) { printTurn(st, view, d.decision, chat); return true }
@@ -238,6 +287,7 @@ async function main() {
       return false
     }, ctrl.signal).catch((e) => { if (!ctrl.signal.aborted) { console.log(`断线了：${e.message}`); process.exitCode = 1 } })
     clearTimeout(timer)
+    clearTimeout(chatTimer) // 轮到你、终局先到：聊天跟着牌面一起打印了，不再单独返回
     ctrl.abort()
     return
   }

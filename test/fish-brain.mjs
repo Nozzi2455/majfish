@@ -73,7 +73,8 @@ const llm = {
         const opts = options.messages[0].content[0].text.split('可选操作')[1].trim().split('\n').slice(1)
         // 有“打”就打最后一张（摸切），否则选第一个
         const k = opts.findLastIndex((l) => /\. 打 /.test(l))
-        if (n === 15) { mid.self = selfText(client.view, brain.recent); mid.ju = juOf(client.view); mid.view = client.view; room.chat(1, '中途说一句', 'chat') }
+        // 第 15 手以后、这一局已经有带理由的出牌时取样（正好是新一局第一手的话，这一局还没有“最近几手”，10-29 偶发过）
+        if (n >= 15 && !mid.self && brain.recent.filter((r) => r.ju === juOf(client.view)).slice(-5).some((r) => r.why)) { mid.self = selfText(client.view, brain.recent); mid.ju = juOf(client.view); mid.view = client.view; room.chat(1, '中途说一句', 'chat') }
         const text = n % 11 === 0 || n === 30 || n === 31 ? '嗯嗯我觉得吧' : `{"choice": ${k >= 0 ? k : 0}, "why": "第${n}手的理由", "say": "${n % 5 === 0 ? '第' + n + '手，就这张' : ''}"}`
         yield { type: 'text-delta', index: 0, text }
         yield { type: 'usage', usage: { inputTokens: 500, outputTokens: 30, cacheReadTokens: 100 } }

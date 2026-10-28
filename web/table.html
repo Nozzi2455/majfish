@@ -6,7 +6,7 @@
 <meta name="referrer" content="no-referrer">
 <title>立直麻将 · 牌桌</title>
 <style>
-  /* 文字分类样式见 web/样式.md：牌桌信息 / 系统消息 / 玩家聊天 / 台词 四类，靠颜色、字号、粗细区分 */
+  /* 文字分类样式见 web/样式.md：牌桌信息 / 系统消息 / 玩家聊天 三类，靠颜色、字号、粗细区分 */
   :root { --bg:#14301f; --felt:#1d4a30; --panel:#0e2416; --ink:#f3efe3; --dim:#9fb0a0; --tile:#fbf7ea; --tile-ink:#222; --accent:#e9b949; --red:#d0453b; --warn:#f0a05a }
   * { box-sizing:border-box }
   body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "Microsoft YaHei","PingFang SC",sans-serif }
@@ -138,7 +138,7 @@
   #decide button.lizhi-toggle.on { background:var(--red); color:#fff }
   #decide .yourturn { font-weight:700; color:var(--accent) }
 
-  /* 聊天：四类消息 */
+  /* 聊天：三类消息 */
   aside { background:var(--panel); border-radius:10px; padding:10px; display:flex; flex-direction:column; max-height:calc(100vh - 80px); min-height:320px }
   .legend { display:flex; flex-wrap:wrap; gap:8px; font-size:12px; margin:2px 0 6px }
   .legend span { padding:0 6px; border-radius:4px; background:#173523 }
@@ -148,8 +148,6 @@
   .m-system.warn { color:var(--warn) }
   .m-table { font-size:13.5px; font-weight:700; color:var(--accent); border-left:3px solid var(--accent); padding-left:6px; margin:3px 0 }
   .m-chat { font-size:15px; font-weight:400; color:var(--ink) }
-  .m-line { font-size:15px; color:var(--ink); padding:3px 8px; border-radius:8px; border-left:3px solid }
-  .m-line .txt::before { content:'「' } .m-line .txt::after { content:'」' }
   form { display:flex; gap:6px; margin-top:6px }
   form input { flex:1; padding:6px; border-radius:6px; border:0; font-size:15px }
 </style>
@@ -188,7 +186,7 @@
   </section>
   <aside>
     <div class="dim">桌上聊天（所有人都看得到）</div>
-    <div class="legend"><span class="m-table">牌桌信息</span><span class="m-system">系统</span><span class="m-chat"><b>某人</b>：聊天</span><span class="m-line" style="border-color:var(--dim)"><span class="txt">台词</span></span></div>
+    <div class="legend"><span class="m-table">牌桌信息</span><span class="m-system">系统</span><span class="m-chat"><b>某人</b>：聊天</span></div>
     <div id="chat"></div>
     <form id="say"><input id="sayText" maxlength="200" placeholder="说点什么…（所有人都看得到）"><button class="btn">发送</button></form>
   </aside>
@@ -202,7 +200,7 @@ const $ = (id) => document.getElementById(id)
 const KIND = { bot: '机器人', human: '真人', agent: 'agent', remote: '外部 agent' }
 let lastRong = null // 这一局最近一次荣和的放铳者（认一炮双响）
 let decision = null, mySeat = null, lobby = null, view = null, colors = [], lizhiMode = false
-const lastLine = {} // 座位 → { text, t }：牌桌上的台词气泡
+const lastLine = {} // 座位 → { text, t }：座位下面的说话气泡（所有玩家说的话）
 const riverLen = {} // 座位 → 上次画的牌河张数（判断哪张是新打的）
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])) }
@@ -545,17 +543,19 @@ async function act(i) {
 }
 
 // ---------- 聊天 ----------
-function chatLine(c) {
+// live = false：重连时补发的旧聊天，只进聊天栏，不冒气泡
+function chatLine(c, { live = true } = {}) {
   const div = document.createElement('div')
-  const kind = c.kind || (c.from < 0 ? 'system' : 'chat')
+  // 玩家说的话一律按普通聊天显示（10-29 主人定：出牌时顺带的台词 kind 'line' 也不再单独一种样式）
+  const kind = c.kind === 'system' || c.kind === 'table' ? c.kind : c.from < 0 ? 'system' : 'chat'
   div.className = 'm-' + kind + (c.warn || /代打|出错|断线|掉线|离桌/.test(kind === 'system' ? c.text : '') ? ' warn' : '')
   if (kind === 'system' || kind === 'table') div.textContent = c.text
   else {
     const col = c.color || colorOf(c.from)
-    div.innerHTML = `${nameHtml(c.name, c.from).replace(/color:[^"]*/, 'color:' + col)}${kind === 'line' ? ' ' : '：'}<span class="txt">${esc(c.text)}</span>`
-    if (kind === 'line') { div.style.borderColor = col; div.style.background = tint(col, .14) }
+    div.innerHTML = `${nameHtml(c.name, c.from).replace(/color:[^"]*/, 'color:' + col)}：<span class="txt">${esc(c.text)}</span>`
   }
-  if (kind === 'line') { lastLine[c.from] = { text: c.text, t: Date.now() }; render() }
+  // 所有玩家说话都在本人座位下面冒气泡（不分聊天框里说的还是出牌时顺带的）
+  if (kind === 'chat' && live) { lastLine[c.from] = { text: c.text, t: Date.now() }; render() }
   $('chat').appendChild(div)
   $('chat').scrollTop = 1e9
 }
@@ -1094,7 +1094,7 @@ function connect() {
     colors = d.lobby ? d.lobby.seats.map((s) => s.color) : (d.room.colors || [])
     $('title').innerHTML = `房间 <b>${code}</b> · ${d.watching ? '旁观 ' : ''}${nameHtml(d.name, d.seat)} · ${esc(d.room.settings.length)}战 ${esc(d.room.settings.rules)}`
     $('chat').innerHTML = ''
-    d.chat.forEach(chatLine)
+    d.chat.forEach((c) => chatLine(c, { live: false }))
     decision = d.decision
     setView(d.view)
     roomStatus = d.room.status

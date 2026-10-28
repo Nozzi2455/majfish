@@ -97,6 +97,53 @@ assert.equal(room3.status, 'lobby')
 assert.equal(room3.players[1].claimed, false, '大厅里离开，座位空出来')
 assert.ok((await cli('join', server.origin, room3.code, '--name', '后来的')).includes('昵称 后来的'), '空出来的座位别人能再领')
 room3.abort('测试结束')
+
+// 聊天叫醒（10-29）：wait 期间别人说话也返回（攒几秒一起打印）；自己的话、系统消息不叫醒；
+// 两次聊天叫醒之间至少隔 --chat-gap 秒；轮到它时马上返回，不受间隔限制，也不改聊天叫醒的计时
+const room4 = server.openRoom({
+  settings: { length: '东风', rules: '雀魂', botLevel: '强', effort: 'low', timeLimitSec: null },
+  seats: [{ name: '肥鱼', kind: 'agent' }, { name: '外来客1', kind: 'remote' }, { name: '机器人甲', kind: 'bot' }, { name: '机器人乙', kind: 'bot' }],
+})
+const say0 = (text) => fetch(`${server.origin}/room/${room4.code}/seat/say`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${room4.players[0].token}` }, body: JSON.stringify({ text }) })
+const timed = async (...a) => { const t = Date.now(); const out = await cli(...a); return { out, ms: Date.now() - t } }
+const stateNow = () => JSON.parse(fs.readFileSync(path.join(dir, '.riichi-seat.json'), 'utf8'))
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+await cli('join', server.origin, room4.code, '--name', '听众')
+// 1. 别人说话：防抖 1 秒后返回，两句一起打印
+let p = timed('wait', '--timeout', '30', '--chat-gap', '4', '--chat-debounce', '1')
+await sleep(400); await say0('有人吗'); await sleep(200); await say0('来聊天')
+let w = await p
+assert.ok(w.out.includes('还没轮到你。桌上有人说话了') && w.out.includes('有人吗') && w.out.includes('来聊天'), w.out)
+assert.ok(!w.out.includes('可选操作'))
+assert.ok(w.ms < 6000, `聊天叫醒太慢：${w.ms}ms`)
+const woke1 = stateNow().chatWokeAt
+assert.ok(woke1 > 0)
+// 2. 自己说的、系统消息不叫醒（等到超时）
+await cli('say', '我自己说一句')
+p = timed('wait', '--timeout', '3', '--chat-gap', '1', '--chat-debounce', '0.3')
+await sleep(300); room4.note('一条系统消息')
+w = await p
+assert.ok(w.out.includes('等超时了') && !w.out.includes('桌上有人说话了'), w.out)
+// 3. 两次聊天叫醒之间隔开：刚叫醒过，再有人说话也要等到上次叫醒后 4 秒
+p = timed('wait', '--timeout', '30', '--chat-gap', '4', '--chat-debounce', '0.3')
+const before = stateNow().chatWokeAt
+await sleep(100); await say0('马上又说')
+w = await p
+assert.ok(w.out.includes('马上又说'), w.out)
+const woke2 = stateNow().chatWokeAt
+assert.ok(woke2 - before >= 3900, `两次聊天叫醒只隔了 ${woke2 - before}ms`)
+// 4. 轮到它：马上返回，不受聊天间隔（30 秒）限制；不改 chatWokeAt
+const fish4 = new SeatClient({ origin: server.origin, code: room4.code, token: room4.players[0].token, brain: new AiBrain(), name: '肥鱼' })
+fish4.run()
+p = timed('wait', '--timeout', '60', '--chat-gap', '30', '--chat-debounce', '0.3')
+await sleep(100); await say0('开局了开局了')
+w = await p
+assert.ok(w.out.includes('可选操作'), w.out)
+assert.ok(w.ms < 15000, `轮到它却等了 ${w.ms}ms`)
+assert.equal(stateNow().chatWokeAt, woke2, '轮到它的那次返回不占、不重置聊天叫醒的计时')
+console.log('聊天叫醒：防抖、不算自己和系统、间隔、轮到它优先 ✓')
+fish4.stop()
+room4.abort('测试结束')
 await server.close()
 fs.rmSync(dir, { recursive: true, force: true })
 console.log('外部座位自测通过')

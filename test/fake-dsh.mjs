@@ -41,16 +41,16 @@ const run = (name, args) => tools.get(name).execute(args, { agent: { id: 'sessio
 const gate = await run('riichi_open', {})
 assert.ok(gate.startsWith('还没开'), gate)
 // 设置清单做进插件：没确认时返回整张清单，工具说明里也有，每一项（含两个昵称、颜色、人设卡）都在
-for (const key of ['length', 'rules', 'owner_plays', 'outside_seats', 'bot_level', 'effort', 'time_limit_sec', 'owner_name', 'owner_color', 'my_name', 'my_color', 'persona']) {
+for (const key of ['length', 'rules', 'owner_plays', 'outside_seats', 'bot_level', 'seat_mode', 'effort', 'chat_wake_gap_sec', 'time_limit_sec', 'owner_name', 'owner_color', 'my_name', 'my_color', 'persona']) {
   assert.ok(gate.includes(`（${key}）`), `清单里要有 ${key}`)
   assert.ok(tools.get('riichi_open').description.includes(`（${key}）`), `工具说明里要有 ${key}`)
 }
 assert.ok(gate.includes('完整列给主人') && tools.get('riichi_open').description.includes('完整列给主人'))
 console.log(await run('riichi_status', {}))
 
-assert.ok((await run('riichi_open', { confirmed: true, owner_plays: false })).includes('你自己在桌上的昵称（my_name）'), '她自己的昵称没确认不开')
-assert.ok((await run('riichi_open', { confirmed: true, my_name: '肥鱼' })).includes('主人在桌上的昵称（owner_name）'), '主人上桌时主人的昵称没确认不开')
-const opened = await run('riichi_open', { confirmed: true, owner_plays: false, length: '东风', my_name: '肥鱼' })
+assert.ok((await run('riichi_open', { confirmed: true, seat_mode: 'plugin',owner_plays: false })).includes('你自己在桌上的昵称（my_name）'), '她自己的昵称没确认不开')
+assert.ok((await run('riichi_open', { confirmed: true, seat_mode: 'plugin',my_name: '肥鱼' })).includes('主人在桌上的昵称（owner_name）'), '主人上桌时主人的昵称没确认不开')
+const opened = await run('riichi_open', { confirmed: true, seat_mode: 'plugin',owner_plays: false, length: '东风', my_name: '肥鱼' })
 console.log(opened)
 assert.ok(opened.includes('旁观你视角的链接'))
 const again = await run('riichi_open', { confirmed: true })
@@ -93,7 +93,7 @@ const agent = {
   model: { current: () => ({ provider: 'fake', model: 'fake-1' }) },
   followup(m) { sent.push(['followup', m]) }, inject(m) { sent.push(['inject', m]) },
 }
-const opened2 = await tools.get('riichi_open').execute({ confirmed: true, owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, persona: '测试人设' }, { agent })
+const opened2 = await tools.get('riichi_open').execute({ confirmed: true, seat_mode: 'plugin',owner_plays: true, owner_name: '小主', my_name: '肥鱼', replace: true, persona: '测试人设' }, { agent })
 const seatUrl = opened2.match(/http:\/\/127\.0\.0\.1:\d+\/room\/\w+\/\?t=[\w-]+/)[0]
 const u = new URL(seatUrl)
 const say = (text) => fetch(`${u.origin}${u.pathname}seat/say`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${u.searchParams.get('t')}` }, body: JSON.stringify({ text }) })
@@ -145,7 +145,7 @@ assert.ok(st3.includes('已中止'), st3)
 const chat2 = (await (await fetch(`${u.origin}${u.pathname}seat/state?t=${tok}`)).json()).chat
 assert.ok(!chat2.some((c) => c.text === '假鱼说话'), '出牌这一路的 say 不进桌上聊天')
 // 施工计划 D：给外部 agent 留座位，返回里带入座命令
-const opened3 = await tools.get('riichi_open').execute({ confirmed: true, owner_plays: true, my_name: '肥鱼', owner_name: '主人', outside_seats: 1, replace: true }, { agent })
+const opened3 = await tools.get('riichi_open').execute({ confirmed: true, seat_mode: 'plugin',owner_plays: true, my_name: '肥鱼', owner_name: '主人', outside_seats: 1, replace: true }, { agent })
 assert.ok(opened3.includes('riichi-seat.mjs" join http://127.0.0.1:') && opened3.includes('外部agent入座.md'), opened3)
 assert.ok((await run('riichi_status', {})).includes('还没准备：小主') || true)
 
@@ -159,7 +159,7 @@ assert.ok(fs.readFileSync(path.join(HOME, 'dsh-riichi', 'notes.md'), 'utf8').inc
 const hist = await run('riichi_history', {})
 assert.ok(hist.includes('最近 ') && hist.includes('小主爱碰') && hist.includes('测试人设'), hist)
 sent.length = 0
-const opened4 = await tools.get('riichi_open').execute({ confirmed: true, owner_plays: false, my_name: '肥鱼', replace: true }, { agent })
+const opened4 = await tools.get('riichi_open').execute({ confirmed: true, seat_mode: 'plugin',owner_plays: false, my_name: '肥鱼', replace: true }, { agent })
 assert.ok(opened4.includes('人设卡沿用了') && opened4.includes('你最近的对局') && opened4.includes('小主爱碰'), opened4)
 let lastCode
 for (;;) {
