@@ -107,7 +107,7 @@ assert.equal(seat.stats.takeovers, sum.proxied, '代打次数要对得上')
 assert.ok(room.chatLog.some((c) => c.kind === 'system' && c.text.includes('代打（回复解析不出来）')), '代打要在桌上写明')
 // 10-29：给她会话那一半看的自己的牌：手牌 + 这一局出牌那一路最近几手和理由；聊天标着哪一局
 assert.ok(mid.self.includes('你现在的手牌（只有你看得到）：'), mid.self)
-assert.match(mid.self, /最近几手[\s\S]*（第\d+手的理由）/, mid.self)
+assert.match(mid.self, /最近打的几手[\s\S]*（第\d+手的理由）/, mid.self)
 assert.ok(brain.recent.length > 0 && brain.recent.every((r) => /^[东南]\d局 \d+本场$/.test(r.ju)), JSON.stringify(brain.recent.slice(-2)))
 assert.equal(brain.recent.length, 30, '最近几手只留 30 条')
 assert.equal(room.chatLog.find((c) => c.text === '中途说一句').ju, mid.ju)
@@ -120,9 +120,14 @@ assert.equal(room.chatLog.find((c) => c.text === '中途说一句').ju, mid.ju)
   link.push({ from: 1, name: '小主', kind: 'chat', text: '要七万', ju: mid.ju })
   link.flush()
   assert.ok(sent[0].includes('你现在的手牌') && !sent[0].includes('换局了'), sent[0])
+  fakeRoom.events = [{ t: Date.now() + 5, text: '甲 打 七万' }, { t: Date.now() + 5, text: '必须 赢 自摸，18000 点（立直、三暗刻）' }]
   view = { ...mid.view, round: '南4局', changbang: 3 }
   link.push({ from: 1, name: '小主', kind: 'chat', text: '还要七万吗', ju: mid.ju })
   link.flush()
+  assert.ok(sent[1].includes('桌上的结果：\n  必须 赢 自摸，18000 点') && !sent[1].includes('打 七万'), sent[1])
+  link.push({ from: 1, name: '小主', kind: 'chat', text: '再说一句', ju: mid.ju })
+  link.flush()
+  assert.ok(!sent[2].includes('桌上的结果'), '说过的结果不重复')
   assert.ok(sent[1].includes('换局了：现在是 南4局 3本场') && sent[1].includes(`（之前那一局 ${mid.ju} 说的）：还要七万吗`), sent[1])
   link.stop()
 }
