@@ -200,6 +200,7 @@ const seatToken = q.get('t'), watchToken = q.get('w')
 const base = `/room/${code}/`
 const $ = (id) => document.getElementById(id)
 const KIND = { bot: '机器人', human: '真人', agent: 'agent', remote: '外部 agent' }
+let lastRong = null // 这一局最近一次荣和的放铳者（认一炮双响）
 let decision = null, mySeat = null, lobby = null, view = null, colors = [], lizhiMode = false
 const lastLine = {} // 座位 → { text, t }：牌桌上的台词气泡
 const riverLen = {} // 座位 → 上次画的牌河张数（判断哪张是新打的）
@@ -585,7 +586,7 @@ function huleCard(h) {
   const yaku = (h.hupai || []).map((x) => `<span>${esc(x.name)}</span><span class="f">${typeof x.fanshu === 'string' ? '役满' : x.fanshu + ' 番'}</span>`).join('')
   const fan = h.damanguan ? `${h.damanguan > 1 ? h.damanguan + ' 倍' : ''}役满` : `${h.fu} 符 ${h.fanshu} 番`
   const hand = parseShoupai(h.shoupai).map((p) => `<span class="t" style="background-image:url(${tileURL(p)})"></span>`).join('')
-  showCard(`<h3>${nameHtml(who?.name, who?.id)} ${from ? `荣和 <span class="dim">←</span> ${nameHtml(from.name, from.id)}` : '自摸'}</h3>
+  showCard(`${h.shuang ? '<div class="dim" style="font-size:14px;margin-bottom:4px">一炮双响：同一张牌，第二家也荣和了</div>' : ''}<h3>${nameHtml(who?.name, who?.id)} ${from ? `荣和 <span class="dim">←</span> ${nameHtml(from.name, from.id)}` : '自摸'}</h3>
     <div class="hl">${hand}</div>
     <div class="yaku">${yaku}</div>
     <div><span class="big">${h.defen}</span> 点 <span class="dim">· ${fan}</span></div>`)
@@ -1121,9 +1122,12 @@ function connect() {
     if (d.decision && d.decision.options.some((o) => o.kind === 'hule')) sfx('canwin')
     render(); renderDecision(); tickClocks(); maybeAuto()
     const m = d.msg
+    // 一炮双响：同一张牌第二家荣和时引擎再发一条 hule，标出来（10-29 实测连弹两张结算卡看懵了）
+    if (m.qipai) lastRong = null
+    if (m.hule) { m.hule.shuang = m.hule.baojia != null && lastRong === m.hule.baojia; if (m.hule.baojia != null) lastRong = m.hule.baojia }
     if (m.qipai) chatLine({ from: -1, kind: 'table', text: `${view.round} ${view.changbang}本场 开始` })
     if (m.dapai && m.dapai.p.includes('*')) chatLine({ from: -1, kind: 'table', text: `${nameAtL(m.dapai.l)?.name} 立直` })
-    if (m.hule) chatLine({ from: -1, kind: 'table', text: `${nameAtL(m.hule.l)?.name} ${m.hule.baojia == null ? '自摸' : '荣和'} ${m.hule.defen} 点（${(m.hule.hupai || []).map((x) => x.name).join('、')}）` })
+    if (m.hule) chatLine({ from: -1, kind: 'table', text: `${m.hule.shuang ? '一炮双响！' : ''}${nameAtL(m.hule.l)?.name} ${m.hule.baojia == null ? '自摸' : '荣和'} ${m.hule.defen} 点（${(m.hule.hupai || []).map((x) => x.name).join('、')}）` })
     if (m.pingju) chatLine({ from: -1, kind: 'table', text: `流局：${m.pingju.name}` })
     try { fxFor(m) } catch (err) { console.warn('fx', err) }
     // 打牌声（立直那张有自己的立直音效，不叠）
