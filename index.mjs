@@ -2,7 +2,7 @@
 // 这里只做 DSH 适配：五个工具 + 一条带 DSH 鉴权的路由；牌桌本体在 lib/server.mjs，用自己的端口。
 import { TableServer } from './lib/server.mjs'
 import { SeatClient, AiBrain } from './lib/seat-client.mjs'
-import { FishBrain } from './lib/fish-brain.mjs'
+import { FishBrain, selfText } from './lib/fish-brain.mjs'
 import { SessionLink, userMessage, ownerText } from './lib/session-link.mjs'
 import { RemoteTable, JOIN } from './lib/remote-table.mjs'
 import { Memory, MAX_NOTES } from './lib/memory.mjs'
@@ -322,7 +322,7 @@ export function apply(ctx) {
         // 桌上别人说的话送进她这个会话（B 路）；她用 riichi_say 回
         let linked = false
         if (typeof exec?.agent?.followup === 'function' && typeof exec?.agent?.inject === 'function') {
-          const link = new SessionLink({ agent: exec.agent, room, seatId: 0, ownerSeat, logger })
+          const link = new SessionLink({ agent: exec.agent, room, seatId: 0, ownerSeat, peek: () => ({ view: client.view, recent: brain.recent || [] }), logger })
           room.chatHooks.add((c) => link.push(c))
           // 关键时刻（开局、她立直、和了、放铳）提醒她一次“想说可以说”
           room.momentHooks.add((m) => link.moment(m))
@@ -467,7 +467,7 @@ export function apply(ctx) {
         const linked = typeof agent?.followup === 'function' && typeof agent?.inject === 'function'
         const tell = (text) => { if (linked) { try { agent.followup(userMessage(text)) } catch (e) { logger.warn?.('riichi: 消息送不进她的会话', e?.message || e) } } }
         if (linked) {
-          entry.link = new SessionLink({ agent, room: table, seatId: j.seat, ownerSeat, logger })
+          entry.link = new SessionLink({ agent, room: table, seatId: j.seat, ownerSeat, peek: () => ({ view: client.view, recent: brain.recent || [] }), logger })
           table.chatHooks.add((c) => entry.link.push(c))
           table.momentHooks.add((m) => entry.link.moment(m))
         }
@@ -587,7 +587,7 @@ export function apply(ctx) {
     },
     {
       name: 'riichi_status',
-      description: '看麻将牌桌现在怎样：哪一局、分数、最近几手（只有公开信息）。也会给出调试页链接。',
+      description: '看麻将牌桌现在怎样：哪一局、分数、最近几手；还有只给你看的：你现在的手牌、听牌，出牌那一路这一局最近替你出的几手和它写的理由（主人问你手里有什么、为什么这么打时用）。也会给出调试页链接。',
       parameters: obj({
         code: { type: 'string', description: '房间码；不填就看最近那一桌' },
       }),
@@ -596,15 +596,18 @@ export function apply(ctx) {
         if (j) {
           const b = j.client.brain?.summary?.()
           const lk = j.link?.stats
-          return describeJoined(j) + (lk ? `\n桌上聊天转给你：${lk.delivered} 条（唤醒 ${lk.wakes} 次，插话 ${lk.injects} 次）` : '') + (b ? `\n你的座位：${b.route} ${b.effort} 档，问了模型 ${b.calls} 次，${b.hands} 手里代打 ${b.proxied} 手` : '')
+          const self = selfText(j.client.view, j.client.brain?.recent)
+          return describeJoined(j) + (self ? `\n${self}` : '') + (lk ? `\n桌上聊天转给你：${lk.delivered} 条（唤醒 ${lk.wakes} 次，插话 ${lk.injects} 次）` : '') + (b ? `\n你的座位：${b.route} ${b.effort} 档，问了模型 ${b.calls} 次，${b.hands} 手里代打 ${b.proxied} 手` : '')
         }
         if (!server) return '现在没有牌桌（还没开过，或者桌面端重启过）。'
         const rooms = [...server.rooms.values()]
         const room = args.code ? server.rooms.get(String(args.code).toUpperCase()) : (server.activeRoom() || rooms[rooms.length - 1])
         if (!room) return args.code ? `没有房间 ${args.code}。` : '现在没有牌桌。'
-        const b = clients.get(room.code)?.brain?.summary?.()
+        const cl = clients.get(room.code)
+        const b = cl?.brain?.summary?.()
         const lk = links.get(room.code)?.stats
-        const mine = (lk ? `\n桌上聊天转给你：${lk.delivered} 条（唤醒 ${lk.wakes} 次，插话 ${lk.injects} 次）` : '') + (b ? `\n你的座位：${b.route} ${b.effort} 档，问了模型 ${b.calls} 次，${b.hands} 手里代打 ${b.proxied} 手，每手中位 ${b.medianSec ?? '-'} 秒，token 输入 ${b.inputTokens}（缓存 ${b.cacheTokens}）/ 输出 ${b.outputTokens}` : '')
+        const self = cl ? selfText(cl.view, cl.brain?.recent) : ''
+        const mine = (self ? `\n${self}` : '') + (lk ? `\n桌上聊天转给你：${lk.delivered} 条（唤醒 ${lk.wakes} 次，插话 ${lk.injects} 次）` : '') + (b ? `\n你的座位：${b.route} ${b.effort} 档，问了模型 ${b.calls} 次，${b.hands} 手里代打 ${b.proxied} 手，每手中位 ${b.medianSec ?? '-'} 秒，token 输入 ${b.inputTokens}（缓存 ${b.cacheTokens}）/ 输出 ${b.outputTokens}` : '')
         return `${describeRoom(server, room, { events: 10 })}${mine}\n调试页：${server.debugUrl()}`
       },
     },
