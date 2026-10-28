@@ -1,0 +1,4 @@
+# name 必须和包名一致，否则 loader 只 warn 然后跳过（表现是“插件没生效但不报错”）。
+- insert:
+    - id: majfish
+      name: majfish

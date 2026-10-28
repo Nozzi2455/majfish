@@ -1,0 +1,1143 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>立直麻将 · 牌桌</title>
+<style>
+  /* 文字分类样式见 web/样式.md：牌桌信息 / 系统消息 / 玩家聊天 / 台词 四类，靠颜色、字号、粗细区分 */
+  :root { --bg:#14301f; --felt:#1d4a30; --panel:#0e2416; --ink:#f3efe3; --dim:#9fb0a0; --tile:#fbf7ea; --tile-ink:#222; --accent:#e9b949; --red:#d0453b; --warn:#f0a05a }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "Microsoft YaHei","PingFang SC",sans-serif }
+  header { padding:10px 16px; display:flex; gap:16px; flex-wrap:wrap; align-items:baseline; background:var(--panel) }
+  header b { color:var(--accent) }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:12px; padding:12px 16px }
+  @media (max-width:860px){ main { grid-template-columns:1fr } }
+  .dim { color:var(--dim) }
+  .nm { font-weight:700 } /* 昵称：一律粗体 + 本人颜色 */
+
+  /* 大厅 */
+  #lobby { background:var(--felt); border-radius:10px; padding:14px 16px }
+  #lobby h2 { margin:0 0 4px; font-size:18px }
+  .lseat { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #2c5a3e }
+  .lseat:last-of-type { border-bottom:0 }
+  .sw { width:14px; height:14px; border-radius:50%; flex:none }
+  .lseat .kind { font-size:13px }
+  /* 块 8：谁和谁是一家（主人和自家肥鱼，插件登记的），公开给所有人看 */
+  .fam { font-size:12px; font-weight:700; padding:0 6px; border-radius:8px; border:1px solid #e8c56a; color:#e8c56a; margin-left:4px; white-space:nowrap }
+  .fam-line { font-size:13.5px; margin:6px 0 2px }
+  .lseat .st { margin-left:auto; font-size:14px }
+  .ok { color:#7fdc8f; font-weight:700 }
+  .me-edit { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #2c5a3e }
+  .me-edit input[type=text] { padding:6px 8px; border-radius:6px; border:0; width:10em; font-size:15px }
+  .me-edit input[type=color] { width:40px; height:32px; border:0; padding:0; background:none; cursor:pointer }
+  button { font:inherit; cursor:pointer }
+  .btn { padding:6px 12px; border-radius:6px; border:0; background:var(--tile); color:var(--tile-ink) }
+  .btn.big { padding:10px 26px; font-size:17px; font-weight:700; background:var(--accent); margin-top:14px }
+  .btn.big.on { background:#5d7a66; color:var(--ink) }
+
+  /* 牌桌 */
+  /* 块 2b：桌布用径向渐变，牌是 Canvas 画的图（画法移植自出视频产线的 mahjong.js），不用外部素材 */
+  .seat { background:radial-gradient(ellipse at 50% 30%, #25603f 0%, #1b4a31 70%, #163d29 100%); border-radius:10px; padding:8px 10px; margin-bottom:8px; border-left:4px solid transparent; box-shadow:inset 0 0 0 1px rgba(255,255,255,.05), 0 2px 6px rgba(0,0,0,.25) }
+  .seat.me { outline:2px solid var(--accent) }
+  /* 轮到谁：只在某一家摸了牌、要出牌时标出他（view.actor）；别人打出一张后到下一次摸牌前谁都不标，
+     这样有没有人在想要不要吃碰杠和，所有人看到的都一样 */
+  .seat.turn { border-left:6px solid var(--accent); box-shadow:inset 0 0 0 2px rgba(233,185,73,.6), 0 0 22px rgba(233,185,73,.28) }
+  .turn-tag { font-size:12.5px; font-weight:700; color:#1d1a10; background:var(--accent); border-radius:999px; padding:0 9px; animation:pulse 1.4s ease-in-out infinite }
+  @keyframes pulse { 50% { opacity:.55 } }
+  .hand .t.use { box-shadow:0 0 0 2px var(--accent); transform:translateY(-6px) }
+  header .tools { margin-left:auto; display:flex; gap:8px }
+  .btn.ghost { background:transparent; color:var(--dim); border:1px solid #3d6b4f; padding:3px 10px; font-size:13.5px }
+  .btn.ghost:hover { color:var(--ink); border-color:var(--dim) }
+  .btn.danger { background:var(--red); color:#fff; font-weight:700 }
+  #soundPanel { position:fixed; top:44px; right:16px; z-index:18; background:var(--panel); border:1px solid #3d6b4f; border-radius:10px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.45); min-width:250px; animation:pop .15s }
+  #soundPanel[hidden] { display:none }
+  .srow { display:flex; align-items:center; gap:8px; padding:4px 0 }
+  .srow[hidden] { display:none }
+  .srow .sl { width:5em; font-size:14px }
+  .srow input[type=range] { flex:1; accent-color:var(--accent) }
+  .tg { border:0; border-radius:999px; padding:1px 10px; font-size:12.5px; font-weight:700; background:var(--accent); color:#1d1a10 }
+  .tg.off { background:#3b4a40; color:var(--dim) }
+  #confirm { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); z-index:20 }
+  #confirm[hidden] { display:none }
+  #confirm .box { background:linear-gradient(#1f3d2b, #132a1d); border:1px solid #3d6b4f; border-radius:14px; padding:18px 22px; max-width:min(420px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.5); animation:pop .2s }
+  #confirm .row { display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
+  /* 吃碰杠立直和了的特效：大字弹出 + 闪光（字体、金色和结算卡一套） */
+  #fx { position:fixed; inset:0; pointer-events:none; z-index:15; overflow:hidden }
+  .fx-word { position:absolute; transform:translate(-50%,-50%); font:900 64px/1 "Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif; color:var(--accent); -webkit-text-stroke:2px #3a2a06; text-shadow:0 0 18px var(--glow, rgba(233,185,73,.8)), 0 4px 0 #2a1d04, 0 8px 22px rgba(0,0,0,.6); white-space:nowrap; animation:word 1.35s cubic-bezier(.2,.9,.3,1.2) forwards }
+  .fx-word.big { font-size:104px }
+  @media (max-width:520px) { .fx-word { font-size:44px } .fx-word.big { font-size:68px } .fx-stick { width:110px } }
+  .fx-word.lizhi { color:#ff6a5c; -webkit-text-stroke-color:#3b0d09; text-shadow:0 0 14px rgba(0,0,0,.75), 0 0 28px rgba(255,106,92,.7), 0 4px 0 #2a0b07 }
+  .fx-word .sub { display:block; margin-top:6px; font:700 18px/1 "Microsoft YaHei",sans-serif; -webkit-text-stroke:0; text-align:center; color:var(--ink); text-shadow:0 2px 6px rgba(0,0,0,.8) }
+  @keyframes word { 0% { transform:translate(-50%,-50%) scale(2.3); opacity:0 } 14% { transform:translate(-50%,-50%) scale(.92); opacity:1 } 24% { transform:translate(-50%,-50%) scale(1.04) } 32%,78% { transform:translate(-50%,-50%) scale(1); opacity:1 } 100% { transform:translate(-50%,-62%) scale(1); opacity:0 } }
+  .fx-stick { position:absolute; width:150px; height:12px; transform:translate(-50%,-50%); border-radius:6px; background:linear-gradient(#fbf7ea,#ddd6c4); box-shadow:0 2px 8px rgba(0,0,0,.5); animation:stick 1.35s ease-out forwards }
+  .fx-stick::after { content:''; position:absolute; left:50%; top:50%; width:9px; height:9px; margin:-4.5px; border-radius:50%; background:var(--red) }
+  @keyframes stick { 0% { transform:translate(-160%,-50%); opacity:0 } 25% { transform:translate(-50%,-50%); opacity:1 } 80% { opacity:1 } 100% { opacity:0 } }
+  .fx-ring { position:absolute; width:40px; height:40px; margin:-20px; border-radius:50%; border:3px solid var(--accent); animation:ring .7s ease-out forwards }
+  @keyframes ring { from { transform:scale(.3); opacity:.9 } to { transform:scale(5); opacity:0 } }
+  #flash { position:fixed; inset:0; pointer-events:none; z-index:14; opacity:0 }
+  #flash.on { animation:flash .75s ease-out }
+  @keyframes flash { 0% { opacity:0 } 12% { opacity:1 } 100% { opacity:0 } }
+  .shake { animation:shake .45s }
+  @keyframes shake { 20% { transform:translate(-5px,2px) } 40% { transform:translate(4px,-2px) } 60% { transform:translate(-3px,1px) } 80% { transform:translate(2px,0) } }
+  .seat .who { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap }
+  .seat .who .pts { margin-left:auto; color:var(--accent); font-variant-numeric:tabular-nums }
+  .seat .lz-tag { color:var(--accent); font-weight:700; font-size:13px }
+  .bubble { display:inline-block; margin-top:4px; padding:2px 10px; border-radius:10px; font-size:14px; max-width:100%; border-left:3px solid; animation:pop .2s }
+  @keyframes pop { from { transform:scale(.9); opacity:0 } to { transform:none; opacity:1 } }
+  .river, .hand, .melds { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px }
+  .river, .melds { gap:2px }
+  .t { display:inline-block; width:26px; height:38px; flex:none; background:center/100% 100% no-repeat; vertical-align:bottom; border-radius:4px }
+  .t.lz { transform:rotate(-90deg); margin:0 6px }
+  .t.cl { opacity:.35 }
+  .t.zimo { margin-left:12px }
+  .t.side { transform:rotate(-90deg); margin:0 6px }
+  .river .t.new { animation:drop .35s ease-out }
+  @keyframes drop { from { transform:translateY(-16px) scale(1.2); opacity:0 } }
+  .river .t.lz.new { animation:dropz .35s ease-out }
+  @keyframes dropz { from { transform:rotate(-90deg) translateX(16px) scale(1.2); opacity:0 } }
+  #dora .t { width:22px; height:32px; margin-left:2px }
+  .hand { gap:2px; margin-top:8px }
+  .hand .t { width:40px; height:58px; transition:transform .1s, filter .1s }
+  .hand .t.can { cursor:pointer }
+  .hand .t.can:hover { transform:translateY(-7px) }
+  .hand .t.no { filter:brightness(.6) }
+  .hand.lizhi-mode .t.can { box-shadow:0 0 0 2px var(--red); transform:translateY(-3px) }
+  .meld { display:inline-flex; align-items:flex-end; gap:1px; padding:3px 6px; margin-right:6px; border-radius:6px; background:rgba(0,0,0,.18) }
+  .meld .t { width:22px; height:32px }
+  .meld .t.side { margin:0 5px }
+  /* 和了 / 流局 结算卡 */
+  #card { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.45); z-index:10; animation:fade .25s }
+  #card[hidden] { display:none }
+  @keyframes fade { from { opacity:0 } }
+  #card .box { background:linear-gradient(#1f3d2b, #132a1d); border:1px solid #3d6b4f; border-radius:14px; padding:18px 22px; min-width:300px; max-width:min(560px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.5); animation:pop .25s }
+  #card h3 { margin:0 0 6px; font-size:20px }
+  #card .big { font-size:30px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums }
+  #card .yaku { display:grid; grid-template-columns:1fr auto; gap:2px 18px; margin:10px 0; font-size:15px }
+  #card .yaku .f { color:var(--accent); text-align:right }
+  #card .hl { display:flex; flex-wrap:wrap; gap:2px; margin:8px 0 }
+  #card .hl .t { width:28px; height:41px }
+  #card .foot { font-size:12.5px; color:var(--dim); margin-top:8px }
+  #decide { background:var(--panel); border-radius:10px; padding:10px; margin-top:8px; min-height:52px }
+  #decide .hint { font-size:14px; color:var(--dim); margin-left:6px }
+  #decide button { margin:3px; padding:6px 12px; font-size:15px; border-radius:6px; border:0; background:var(--tile); color:var(--tile-ink) }
+  #decide button.hule { background:var(--red); color:#fff; font-weight:800; font-size:20px; padding:10px 26px; box-shadow:0 0 0 3px var(--accent), 0 0 22px rgba(208,69,59,.85); animation:winpulse 1s ease-in-out infinite }
+  @keyframes winpulse { 50% { transform:scale(1.06); box-shadow:0 0 0 3px var(--accent), 0 0 34px rgba(233,185,73,.9) } }
+  .canwin { display:inline-block; font-size:21px; font-weight:800; color:#fff; background:var(--red); padding:2px 14px; border-radius:8px; box-shadow:0 0 18px rgba(208,69,59,.7); animation:pulse 1s ease-in-out infinite }
+  .seat.winning { box-shadow:inset 0 0 0 3px var(--red), 0 0 30px rgba(208,69,59,.6) }
+  /* 听牌提示：打了就听牌的手牌底下一个金点；手牌下面一行写听什么、剩几枚、振听 */
+  .hand .t { position:relative }
+  .hand .t.tingok::after { content:''; position:absolute; left:50%; bottom:-8px; width:7px; height:7px; margin-left:-3.5px; border-radius:50%; background:var(--accent); box-shadow:0 0 6px var(--accent) }
+  .ting-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; min-height:26px; margin-top:12px; font-size:14px }
+  .ting-line .tw { display:inline-flex; align-items:center; gap:3px }
+  .ting-line .t { width:22px; height:32px }
+  .ting-line .fu { color:#ff7b6e; font-weight:700 }
+  #decide button.lizhi, #decide button.lizhi-toggle { background:var(--accent); font-weight:700 }
+  #decide button.lizhi-toggle.on { background:var(--red); color:#fff }
+  #decide .yourturn { font-weight:700; color:var(--accent) }
+
+  /* 聊天：四类消息 */
+  aside { background:var(--panel); border-radius:10px; padding:10px; display:flex; flex-direction:column; max-height:calc(100vh - 80px); min-height:320px }
+  .legend { display:flex; flex-wrap:wrap; gap:8px; font-size:12px; margin:2px 0 6px }
+  .legend span { padding:0 6px; border-radius:4px; background:#173523 }
+  #chat { flex:1; overflow:auto; min-height:160px; display:flex; flex-direction:column; gap:3px }
+  .m-system { font-size:12.5px; font-weight:400; color:var(--dim) }
+  .m-system::before { content:'· ' }
+  .m-system.warn { color:var(--warn) }
+  .m-table { font-size:13.5px; font-weight:700; color:var(--accent); border-left:3px solid var(--accent); padding-left:6px; margin:3px 0 }
+  .m-chat { font-size:15px; font-weight:400; color:var(--ink) }
+  .m-line { font-size:15px; color:var(--ink); padding:3px 8px; border-radius:8px; border-left:3px solid }
+  .m-line .txt::before { content:'「' } .m-line .txt::after { content:'」' }
+  form { display:flex; gap:6px; margin-top:6px }
+  form input { flex:1; padding:6px; border-radius:6px; border:0; font-size:15px }
+</style>
+</head>
+<body>
+<header>
+  <span id="title">连接中…</span>
+  <span id="round" class="dim"></span>
+  <span id="dora"></span>
+  <span id="status" class="dim"></span>
+  <span class="tools">
+    <span id="soundHint" class="dim" style="font-size:12.5px;align-self:center" hidden>点一下页面就有声音</span>
+    <button class="btn ghost" id="soundBtn" title="音效、BGM、立直彩蛋">🔊 声音</button>
+    <button class="btn ghost" id="endBtn" hidden>结束对局</button>
+  </span>
+</header>
+<div id="card" hidden></div>
+<div id="soundPanel" hidden>
+  <div class="srow"><span class="sl">音效</span><button class="tg" id="sfxT"></button><input type="range" id="sfxV" min="0" max="1" step="0.05" aria-label="音效音量"></div>
+  <div class="srow"><span class="sl">BGM</span><button class="tg" id="bgmT"></button><input type="range" id="bgmV" min="0" max="1" step="0.05" aria-label="BGM 音量"></div>
+  <div class="srow" id="eggRow"><span class="sl">立直彩蛋</span><button class="tg" id="eggT"></button><span class="dim" style="font-size:12px">音量跟着音效</span></div>
+  <div class="dim" id="bgmSrc" style="font-size:12px;margin-top:4px"></div>
+</div>
+<div id="confirm" hidden></div>
+<div id="flash"></div>
+<div id="fx"></div>
+<main>
+  <section>
+    <div id="lobby" hidden></div>
+    <div id="table" hidden>
+      <div id="seats"></div>
+      <div id="decide" class="dim">等待中…</div>
+    </div>
+  </section>
+  <aside>
+    <div class="dim">桌上聊天（所有人都看得到）</div>
+    <div class="legend"><span class="m-table">牌桌信息</span><span class="m-system">系统</span><span class="m-chat"><b>某人</b>：聊天</span><span class="m-line" style="border-color:var(--dim)"><span class="txt">台词</span></span></div>
+    <div id="chat"></div>
+    <form id="say"><input id="sayText" maxlength="200" placeholder="说点什么…（所有人都看得到）"><button class="btn">发送</button></form>
+  </aside>
+</main>
+<script>
+const q = new URLSearchParams(location.search)
+const code = location.pathname.split('/').filter(Boolean)[1]
+const seatToken = q.get('t'), watchToken = q.get('w')
+const base = `/room/${code}/`
+const $ = (id) => document.getElementById(id)
+const KIND = { bot: '机器人', human: '真人', agent: 'agent', remote: '外部 agent' }
+let decision = null, mySeat = null, lobby = null, view = null, colors = [], lizhiMode = false
+const lastLine = {} // 座位 → { text, t }：牌桌上的台词气泡
+const riverLen = {} // 座位 → 上次画的牌河张数（判断哪张是新打的）
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])) }
+function colorOf(id) { return colors[id] || 'var(--ink)' }
+function nameHtml(name, id) { return `<span class="nm" style="color:${colorOf(id)}">${esc(name)}</span>` }
+// 一家（块 8）：开局后看 view.families，大厅里看 lobby.families；只有一家时不编号
+function families() { return (view && view.families) || (lobby && lobby.families) || [] }
+function famTag(id) {
+  const fs = families(), f = fs.find((x) => x.members.includes(id))
+  return f ? `<span class="fam" title="${esc(f.names.join(' + '))} 是一家">一家${fs.length > 1 ? '·' + f.n : ''}</span>` : ''
+}
+function famLine() {
+  const fs = families()
+  return fs.length ? `<div class="fam-line dim">一家：${fs.map((f) => f.members.map((id, k) => nameHtml(f.names[k], id)).join(' + ')).join('；')}</div>` : ''
+}
+function tint(c, a) { const m = /^#(..)(..)(..)$/.exec(c || ''); return m ? `rgba(${parseInt(m[1],16)},${parseInt(m[2],16)},${parseInt(m[3],16)},${a})` : 'transparent' }
+function api(p, body) {
+  return fetch(base + 'seat/' + p, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + seatToken }, body: JSON.stringify(body) })
+    .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
+}
+
+// ---------- 牌面（Canvas 画，移植自出视频产线 频道/产线/web/mahjong.js 的 drawFace） ----------
+const INK = '#1C1D21', T_RED = '#B5262F', T_GREEN = '#24774A', T_BLUE = '#22497E'
+const FACE = '#F3EFE5', FACE_TG = '#DCD7CB', EDGE = '#C8C0AE', BACK = '#3D5F7E'
+const NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九']
+const HONKEY = ['', 'E', 'S', 'W', 'N', 'P', 'F', 'C']
+const SERIF = (px) => `900 ${px}px "Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif`
+function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath() }
+function pin(c, x, y, r, col) {
+  c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill()
+  c.fillStyle = FACE; c.beginPath(); c.arc(x, y, r * 0.62, 0, Math.PI * 2); c.fill()
+  c.fillStyle = col; c.beginPath(); c.arc(x, y, r * 0.3, 0, Math.PI * 2); c.fill()
+}
+function stick(c, x, y, w, h, col) {
+  c.fillStyle = col; rr(c, x - w / 2, y - h / 2, w, h, w * 0.32); c.fill()
+  c.fillStyle = FACE; c.fillRect(x - w / 2, y - 0.7, w, 1.4)
+  c.fillStyle = 'rgba(255,255,255,0.32)'
+  c.fillRect(x - w * 0.24, y - h / 2 + 1.5, w * 0.16, h / 2 - 3); c.fillRect(x - w * 0.24, y + 1.5, w * 0.16, h / 2 - 3)
+}
+/** 牌面画在 w×h 的格子里。p 是 majiang 记法：m1..m9 / m0 赤五 / p / s / z1..z7（东南西北白发中）。 */
+function drawFace(c, p, w, h) {
+  const s = p[0], red = p[1] === '0', n = red ? 5 : +p[1]
+  const cx = w / 2, cy = h / 2
+  c.textAlign = 'center'; c.textBaseline = 'middle'
+  if (s === 'z') {
+    const k = HONKEY[n]
+    if (k === 'P') { c.strokeStyle = T_BLUE; c.lineWidth = Math.max(1.5, w * 0.05); rr(c, w * 0.2, h * 0.17, w * 0.6, h * 0.66, w * 0.06); c.stroke(); return }
+    c.fillStyle = k === 'F' ? T_GREEN : k === 'C' ? T_RED : INK
+    c.font = SERIF(Math.round(w * 0.74))
+    c.fillText({ E: '東', S: '南', W: '西', N: '北', F: '發', C: '中' }[k], cx, cy + h * 0.02)
+    return
+  }
+  if (s === 'm') {
+    c.fillStyle = red ? T_RED : INK; c.font = SERIF(Math.round(w * 0.5)); c.fillText(NUM[n - 1], cx, h * 0.29)
+    c.fillStyle = T_RED; c.font = SERIF(Math.round(w * 0.58)); c.fillText('萬', cx, h * 0.69)
+    return
+  }
+  if (s === 'p') {
+    const R = red ? T_RED : null
+    const P = (x, y, r, col) => pin(c, x * w, y * h, r * w, R || col)
+    const B = T_BLUE, G = T_GREEN, Rd = T_RED
+    if (n === 1) { pin(c, cx, cy, w * 0.36, T_GREEN); pin(c, cx, cy, w * 0.17, T_RED) }
+    if (n === 2) { P(0.5, 0.28, 0.17, G); P(0.5, 0.72, 0.17, B) }
+    if (n === 3) { P(0.27, 0.22, 0.14, B); P(0.5, 0.5, 0.14, Rd); P(0.73, 0.78, 0.14, G) }
+    if (n === 4) { P(0.3, 0.28, 0.15, B); P(0.7, 0.28, 0.15, G); P(0.3, 0.72, 0.15, G); P(0.7, 0.72, 0.15, B) }
+    if (n === 5) { P(0.28, 0.24, 0.14, B); P(0.72, 0.24, 0.14, G); P(0.5, 0.5, 0.14, Rd); P(0.28, 0.76, 0.14, G); P(0.72, 0.76, 0.14, B) }
+    if (n === 6) { P(0.3, 0.2, 0.13, G); P(0.7, 0.2, 0.13, G); for (const y of [0.52, 0.8]) { P(0.3, y, 0.13, Rd); P(0.7, y, 0.13, Rd) } }
+    if (n === 7) { P(0.24, 0.15, 0.11, G); P(0.5, 0.25, 0.11, G); P(0.76, 0.35, 0.11, G); for (const y of [0.6, 0.84]) { P(0.3, y, 0.12, Rd); P(0.7, y, 0.12, Rd) } }
+    if (n === 8) for (let i = 0; i < 4; i++) { P(0.3, 0.15 + i * 0.233, 0.12, B); P(0.7, 0.15 + i * 0.233, 0.12, B) }
+    if (n === 9) for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) P(0.2 + q * 0.3, 0.2 + r * 0.3, 0.115, [B, Rd, G][r])
+    return
+  }
+  const G = red ? T_RED : T_GREEN, Rd = T_RED
+  const sw = w / 10 * 1.55
+  const S1 = (x, y, hh, col) => stick(c, x * w, y * h, sw, hh * h, col)
+  // 一索：照传统画成一只鸟（雀魂也是鸟）。原来是“一根粗竹子 + 顶上一个红点”，主人看成了赤宝牌（10-28）。
+  // 按 52×70 的格子画，再缩放到实际大小：尾羽三根（带眼斑）、身子、翅膀、头、红冠、黄嘴。
+  if (n === 1) {
+    c.save(); c.translate(cx, cy); c.scale(w / 52, h / 70)
+    for (const [ang, col] of [[0.55, T_GREEN], [0.15, T_BLUE], [-0.25, T_GREEN]]) {
+      c.save(); c.rotate(ang); c.fillStyle = red ? T_RED : col
+      c.beginPath(); c.ellipse(0, 17, 5, 15, 0, 0, Math.PI * 2); c.fill()
+      c.fillStyle = FACE; c.beginPath(); c.arc(0, 26, 2.6, 0, Math.PI * 2); c.fill()
+      c.fillStyle = T_RED; c.beginPath(); c.arc(0, 26, 1.3, 0, Math.PI * 2); c.fill()
+      c.restore()
+    }
+    c.fillStyle = T_GREEN; c.beginPath(); c.ellipse(3, -3, 10, 13, 0.3, 0, Math.PI * 2); c.fill()
+    c.fillStyle = T_BLUE; c.beginPath(); c.ellipse(0, 0, 5, 9, 0.45, 0, Math.PI * 2); c.fill()
+    c.fillStyle = T_GREEN; c.beginPath(); c.arc(9, -17, 6.5, 0, Math.PI * 2); c.fill()
+    c.fillStyle = T_RED; c.beginPath(); c.moveTo(6, -22); c.lineTo(8.5, -29); c.lineTo(12, -22.5); c.closePath(); c.fill()
+    c.fillStyle = '#C8902A'; c.beginPath(); c.moveTo(14.5, -19); c.lineTo(21, -16.5); c.lineTo(14.5, -14.5); c.closePath(); c.fill()
+    c.fillStyle = FACE; c.beginPath(); c.arc(11, -18, 1.9, 0, Math.PI * 2); c.fill()
+    c.fillStyle = INK; c.beginPath(); c.arc(11.4, -18, 1, 0, Math.PI * 2); c.fill()
+    c.restore()
+  }
+  if (n === 2) { S1(0.5, 0.29, 0.34, G); S1(0.5, 0.71, 0.34, G) }
+  if (n === 3) { S1(0.5, 0.29, 0.34, G); S1(0.3, 0.71, 0.34, G); S1(0.7, 0.71, 0.34, G) }
+  if (n === 4) for (const y of [0.29, 0.71]) { S1(0.3, y, 0.34, G); S1(0.7, y, 0.34, G) }
+  if (n === 5) { for (const y of [0.29, 0.71]) { S1(0.24, y, 0.34, G); S1(0.76, y, 0.34, G) } S1(0.5, 0.5, 0.34, red ? G : Rd) }
+  if (n === 6) for (const y of [0.29, 0.71]) for (const x of [0.24, 0.5, 0.76]) S1(x, y, 0.34, G)
+  if (n === 7) { S1(0.5, 0.17, 0.24, Rd); for (const y of [0.48, 0.79]) for (const x of [0.24, 0.5, 0.76]) S1(x, y, 0.26, G) }
+  // 八索：两边竖竹，中间两根斜竹上半成 /\、下半成 \/，合起来是个菱形（直着排会像六索）
+  if (n === 8) for (const [y, a] of [[0.29, 0.3], [0.71, -0.3]]) {
+    S1(0.17, y, 0.34, G); S1(0.83, y, 0.34, G)
+    for (const [x, s] of [[0.37, 1], [0.63, -1]]) {
+      c.save(); c.translate(x * w, y * h); c.rotate(a * s); stick(c, 0, 0, sw, h * 0.32, G); c.restore()
+    }
+  }
+  if (n === 9) for (const y of [0.18, 0.5, 0.82]) for (const x of [0.24, 0.5, 0.76]) S1(x, y, 0.25, x === 0.5 ? Rd : G)
+}
+/** 一张牌（含底座）→ dataURL，按牌和样式缓存。opt：'' / 'tg'（摸切，暗一点）/ 'back'（背面）。 */
+const TILE_URL = {}
+function tileURL(p, opt = '') {
+  const key = p + '|' + opt
+  if (TILE_URL[key]) return TILE_URL[key]
+  const W = 52, H = 70, DEP = 6, sc = 2
+  const cvs = document.createElement('canvas')
+  cvs.width = W * sc; cvs.height = (H + DEP) * sc
+  const c = cvs.getContext('2d')
+  c.scale(sc, sc)
+  const r = 6
+  if (opt === 'back') {
+    c.fillStyle = '#2C4560'; rr(c, 0, 0, W, H + DEP, r); c.fill()
+    c.fillStyle = BACK; rr(c, 0, 0, W, H, r); c.fill()
+  } else {
+    c.fillStyle = EDGE; rr(c, 0, 0, W, H + DEP, r); c.fill()
+    c.fillStyle = opt === 'tg' ? FACE_TG : FACE; rr(c, 0, 0, W, H, r); c.fill()
+    c.save(); rr(c, 0, 0, W, H, r); c.clip()
+    if (opt === 'tg') c.globalAlpha = 0.8
+    drawFace(c, p, W, H)
+    c.restore()
+    if (p[1] === '0' && p[0] !== 'z') { c.fillStyle = T_RED; c.beginPath(); c.arc(W - W * 0.14, H * 0.1, W * 0.065, 0, Math.PI * 2); c.fill() }
+  }
+  return (TILE_URL[key] = cvs.toDataURL())
+}
+
+function tile(t, extra = '', attrs = '') {
+  const cls = ['t', t.tsumogiri ? 'tg' : '', t.lizhi ? 'lz' : '', t.called ? 'cl' : '', extra].filter(Boolean).join(' ')
+  const title = esc(t.name + (t.tsumogiri ? '（摸切）' : '') + (t.lizhi ? '（立直）' : ''))
+  return `<span class="${cls}" style="background-image:url(${tileURL(t.p, t.tsumogiri ? 'tg' : '')})" title="${title}" role="img" aria-label="${title}" ${attrs}></span>`
+}
+
+/** 副露串（'m1-23' / 'p555=' / 's5550' / 'z111+1'）→ 牌图：被鸣的那张横放；暗杠两头扣着。 */
+function meldHtml(m) {
+  const s = m.m[0], body = m.m.slice(1)
+  const parts = [...body.matchAll(/(\d)([+=\-]?)/g)].map((x) => ({ n: x[1], side: !!x[2] }))
+  const ankan = parts.length === 4 && !/[+=\-]/.test(body)
+  const tiles = parts.map((x, i) => {
+    if (ankan && (i === 0 || i === 3)) return `<span class="t" style="background-image:url(${tileURL(s + x.n, 'back')})"></span>`
+    return `<span class="t ${x.side ? 'side' : ''}" style="background-image:url(${tileURL(s + x.n)})"></span>`
+  }).join('')
+  return `<span class="meld" title="${esc(m.name)}">${tiles}</span>`
+}
+
+/** 'm123p456s78z11' → 牌列表（和了时亮出来的手牌，逗号后是副露，不画）。 */
+function parseShoupai(str) {
+  const out = []
+  let suit = null
+  for (const ch of String(str || '').split(',')[0]) {
+    if ('mpsz'.includes(ch)) suit = ch
+    else if (/\d/.test(ch) && suit) out.push(suit + ch)
+  }
+  return out
+}
+
+// ---------- 大厅 ----------
+function renderLobby() {
+  const inLobby = lobby && lobby.status === 'lobby'
+  $('lobby').hidden = !inLobby
+  $('table').hidden = inLobby
+  if (!inLobby) return
+  colors = lobby.seats.map((s) => s.color)
+  const me = lobby.seats.find((s) => s.id === mySeat)
+  const canEdit = seatToken && me && me.kind !== 'bot'
+  $('lobby').innerHTML = `
+    <h2>大厅</h2>
+    <div class="dim">四家都点了“准备”就开局（机器人和 agent 座位自动准备）。</div>
+    ${famLine()}
+    ${lobby.seats.map((s) => `
+      <div class="lseat">
+        <span class="sw" style="background:${s.color}"></span>
+        ${nameHtml(s.name, s.id)}${famTag(s.id)}${s.id === mySeat ? ' <span class="dim">（你）</span>' : ''}
+        <span class="kind dim">${s.outside && !s.claimed ? '空座' : (KIND[s.kind] || s.kind) + (s.host ? '（房主）' : s.outside ? '（外来）' : '')}${s.kind !== 'bot' && s.claimed ? (s.connected ? ' · 在线' : ' · 没连上') : ''}</span>
+        <span class="st">${s.ready ? '<span class="ok">✓ 准备好了</span>' : '<span class="dim">等准备…</span>'}</span>
+      </div>`).join('')}
+    ${canEdit ? `
+      <div class="me-edit">
+        <span>你的昵称</span><input type="text" id="myName" maxlength="16" value="${esc(me.name)}">
+        <span>颜色</span><input type="color" id="myColor" value="${me.color}">
+        <button class="btn" id="saveProfile">保存</button><span id="profileMsg" class="dim"></span>
+      </div>
+      <button class="btn big ${me.ready ? 'on' : ''}" id="readyBtn">${me.ready ? '取消准备' : '准备'}</button>` : watchToken ? '<div class="dim" style="margin-top:10px">旁观中，开局后能看到这一家的视角。</div>' : ''}`
+  if (!canEdit) return
+  $('saveProfile').onclick = async () => {
+    const color = $('myColor').value.toLowerCase()
+    const r = await api('profile', { name: $('myName').value, color })
+    const msg = r.status === 200 ? (r.body.color !== color ? '已保存（颜色太暗，自动调亮了）' : '已保存') : (r.body.error || '保存失败')
+    setTimeout(() => { if ($('profileMsg')) $('profileMsg').textContent = msg }, 50) // 大厅事件会重画一遍，等它画完再写
+  }
+  $('readyBtn').onclick = () => api('ready', { ready: !me.ready })
+}
+
+// ---------- 牌桌 ----------
+function render() {
+  if (!view || view.phase !== 'playing') { $('seats').innerHTML = '<div class="dim">等开局…</div>'; return }
+  $('round').textContent = `${view.round} ${view.changbang}本场 · 供托 ${view.lizhibang} · 余 ${view.paishu} 张`
+  $('dora').innerHTML = '宝牌指示 ' + view.baopai.map((t) => tile(t)).join('')
+  // 自己放最下面，其余按 下家 → 对家 → 上家 倒着排在上面
+  const order = [3, 2, 1, 0].map((k) => view.seats[(view.me + k) % 4])
+  const now = Date.now()
+  // 牌河刚多了一张的座位：那张播一次落下动画（之后重画不再播）
+  const newRiver = {}
+  for (const s of view.seats) { if ((riverLen[s.id] ?? s.he.length) < s.he.length) newRiver[s.id] = s.he.length; riverLen[s.id] = s.he.length }
+  $('seats').innerHTML = order.map((s) => {
+    const line = lastLine[s.id] && now - lastLine[s.id].t < 12000 ? lastLine[s.id].text : null
+    const turn = roomStatus === 'playing' && view.actor != null && s.l === view.actor
+    return `
+    <div class="seat ${s.me ? 'me' : ''} ${turn ? 'turn' : ''} ${s.me && decision && decision.options.some((o) => o.kind === 'hule') ? 'winning' : ''}" data-id="${s.id}">
+      <div class="who"><b>${s.feng}</b> ${nameHtml(s.name, s.id)}${famTag(s.id)} ${s.l === 0 ? '<span class="dim" style="font-size:12.5px">庄</span>' : ''} ${s.lizhi ? '<span class="lz-tag">立直</span>' : ''}${turn ? `<span class="turn-tag">${s.me ? '轮到你出牌' : '思考中'}<span class="clk" data-since="actor"></span></span>` : ''}<span class="pts">${s.defen}</span></div>
+      ${line ? `<div class="bubble" style="background:${tint(colorOf(s.id), .16)};border-color:${colorOf(s.id)}">${esc(line)}</div>` : ''}
+      <div class="river">${s.he.map((t, i) => tile(t, i === s.he.length - 1 && newRiver[s.id] === s.he.length ? 'new' : '')).join('') || '<span class="dim">（还没打牌）</span>'}</div>
+      ${s.fulou.length ? `<div class="melds">${s.fulou.map(meldHtml).join('')}</div>` : ''}
+      ${s.me ? `<div class="hand ${lizhiMode ? 'lizhi-mode' : ''}" id="hand">${handHtml()}</div><div class="ting-line" id="tingLine"></div>` : ''}
+    </div>`
+  }).join('')
+  const hand = $('hand')
+  if (hand) hand.querySelectorAll('.t.can').forEach((el) => {
+    el.onclick = () => clickTile(el.dataset.p, el.dataset.z === '1')
+    el.onmouseenter = () => { sfx('hover'); tingLine(el.dataset.p, el.dataset.z === '1') }
+    el.onmouseleave = () => tingLine()
+  })
+  tingLine()
+}
+
+/** 手牌里这张牌对应的编号选项（打牌或立直打牌）。摸到的那张优先找“摸切”。 */
+function optionFor(p, isZimo, lizhi) {
+  if (!decision) return null
+  const kind = lizhi ? 'lizhi' : 'dapai', tail = lizhi ? '*' : ''
+  const opts = decision.options.filter((o) => o.kind === kind)
+  const want = isZimo ? [p + '_' + tail, p + tail] : [p + tail, p + '_' + tail]
+  for (const w of want) { const o = opts.find((x) => x.reply && x.reply.dapai === w); if (o) return o }
+  return null
+}
+
+function handHtml() {
+  const h = view.hand
+  const playable = !!decision && decision.options.some((o) => o.kind === 'dapai' || o.kind === 'lizhi')
+  const one = (t, z) => {
+    let cls = ''
+    const o = playable ? optionFor(t.p, z, lizhiMode) : null
+    if (playable) cls = o ? 'can' : 'no'
+    // 打了这张就听牌的，底下一个金点；鼠标放上去，下面那行写“打 X → 听 …”
+    if (o && o.ting) cls += ' tingok'
+    return tile(t, [cls, z ? 'zimo' : ''].filter(Boolean).join(' '), `data-p="${t.p}" data-z="${z ? 1 : 0}"`)
+  }
+  return h.tiles.map((t) => one(t, false)).join('') + (h.zimo ? one(h.zimo, true) : '')
+}
+
+/** 听牌那一行：'听 [3索] 剩2 [6索] 剩0 · 振听'。 */
+function tingHtml(t) {
+  return t.waits.map((w) => `<span class="tw">${tile({ p: w.p, name: w.name })}<span class="${w.left ? 'dim' : 'fu'}">剩${w.left}</span></span>`).join('')
+    + (t.furiten ? '<span class="fu">振听（不能荣和）</span>' : '')
+}
+function tingLine(hoverP, hoverZ) {
+  const el = $('tingLine')
+  if (!el || !view || !view.hand) return
+  const o = hoverP ? optionFor(hoverP, hoverZ, lizhiMode) : null
+  if (o) el.innerHTML = o.ting ? `<b>打 ${esc(tileNameOf(hoverP))} →</b> 听 ${tingHtml(o.ting)}` : `<span class="dim">打 ${esc(tileNameOf(hoverP))} → 不听牌</span>`
+  else if (view.hand.ting) el.innerHTML = `<b>听</b> ${tingHtml(view.hand.ting)}`
+  else if (decision && decision.options.some((x) => x.ting)) el.innerHTML = '<span class="dim">打金点的牌就听牌（鼠标放上去看听什么）</span>'
+  else el.innerHTML = ''
+}
+function tileNameOf(p) { const t = [...view.hand.tiles, view.hand.zimo].find((x) => x && x.p === p); return t ? t.name : p }
+
+function clickTile(p, isZimo) {
+  const o = optionFor(p, isZimo, lizhiMode)
+  if (o) act(o.i)
+}
+
+function renderDecision() {
+  const box = $('decide')
+  // 没轮到自己时：有人在摸牌出牌就写是谁；别人打出一张后（可能有人在想要不要鸣牌）一律只写“等待中”
+  if (roomStatus === 'ended' || roomStatus === 'aborted') { box.innerHTML = `<b>这一桌结束了</b>${roomStatus === 'aborted' ? '（中止）' : ''}`; return }
+  const actor = view && view.phase === 'playing' && view.actor != null ? view.seats.find((s) => s.l === view.actor) : null
+  // 有人在摸牌出牌：写是谁、想了几秒；打出一张后的等待：所有人看到的都一样，只写“等待中 N 秒”（超过 1 秒才出秒数）
+  const waitText = actor && !actor.me
+    ? `等 ${nameHtml(actor.name, actor.id)} 出牌…<span class="clk" data-since="actor" data-fmt="（思考中 {} 秒）"></span>`
+    : '等待中<span class="clk" data-since="wait"></span>…'
+  if (watchToken) { box.innerHTML = `<span class="dim">旁观中（只能看这一家的视角）· ${waitText}</span>`; return }
+  if (!decision) { box.innerHTML = `<span class="dim">${waitText}</span>`; lizhiMode = false; return }
+  const dl = decision.deadline ? `（限时，还剩 ${Math.max(0, Math.round((decision.deadline - Date.now()) / 1000))} 秒）` : ''
+  const hasDapai = decision.options.some((o) => o.kind === 'dapai')
+  const hasLizhi = decision.options.some((o) => o.kind === 'lizhi')
+  const others = decision.options.filter((o) => o.kind !== 'dapai' && o.kind !== 'lizhi')
+  const call = decision.options.some((o) => o.kind === 'skip')
+  // 能和的时候要一眼看出来（主人 10-28 实测：和牌时跟出牌界面一样，差点以为没和出来）
+  const win = decision.options.find((o) => o.kind === 'hule')
+  let html = win
+    ? `<span class="canwin">能和了！${esc(win.label)}</span><span class="hint">点下面红色的按钮和牌${dl}</span>`
+    : `<span class="yourturn">${call ? '要鸣牌吗？' : '轮到你了'}${dl}</span>`
+  if (hasDapai || hasLizhi) html += `<span class="hint">${lizhiMode ? '选一张打出并立直（红框的牌）' : '点手牌打出'}</span>`
+  html += '<div>'
+  if (hasLizhi) html += `<button class="lizhi-toggle ${lizhiMode ? 'on' : ''}" id="lzToggle">${lizhiMode ? '取消立直' : '立直'}</button>`
+  html += others.map((o) => `<button class="${o.kind}" data-i="${o.i}">${esc(o.label)}</button>`).join('')
+  html += '</div>'
+  box.innerHTML = html
+  box.querySelectorAll('button[data-i]').forEach((b) => {
+    b.onclick = () => { sfx('select'); act(+b.dataset.i) }
+    // 吃碰杠：鼠标放上去时把要用的手牌抬起来，同一张牌有几种吃法时一眼分得清
+    const o = decision.options[+b.dataset.i]
+    if (o && o.reply && o.reply.fulou) {
+      b.onmouseenter = () => markUse(o.reply.fulou)
+      b.onmouseleave = () => markUse(null)
+    }
+  })
+  if ($('lzToggle')) $('lzToggle').onclick = () => { sfx('select'); lizhiMode = !lizhiMode; renderDecision(); render() }
+}
+
+/** 副露串里自己手里出的那几张（不带 +=- 的数字）在手牌上标出来；m 为 null 时清掉。 */
+function markUse(m) {
+  const hand = $('hand')
+  if (!hand) return
+  hand.querySelectorAll('.t.use').forEach((el) => el.classList.remove('use'))
+  if (!m) return
+  const own = [...m.slice(1).matchAll(/(\d)([+=\-]?)/g)].filter((x) => !x[2]).map((x) => m[0] + x[1])
+  for (const p of own) {
+    const el = [...hand.querySelectorAll('.t')].find((e) => e.dataset.p === p && !e.classList.contains('use'))
+    if (el) el.classList.add('use')
+  }
+}
+
+async function act(i) {
+  const d = decision
+  if (!d) return
+  decision = null
+  lizhiMode = false
+  renderDecision(); render()
+  const r = await api('act', { rev: d.rev, choice: i })
+  if (r.status !== 200 && r.status !== 409) chatLine({ from: -1, kind: 'system', warn: true, text: '出牌失败：' + r.status })
+}
+
+// ---------- 聊天 ----------
+function chatLine(c) {
+  const div = document.createElement('div')
+  const kind = c.kind || (c.from < 0 ? 'system' : 'chat')
+  div.className = 'm-' + kind + (c.warn || /代打|出错|断线|掉线|离桌/.test(kind === 'system' ? c.text : '') ? ' warn' : '')
+  if (kind === 'system' || kind === 'table') div.textContent = c.text
+  else {
+    const col = c.color || colorOf(c.from)
+    div.innerHTML = `${nameHtml(c.name, c.from).replace(/color:[^"]*/, 'color:' + col)}${kind === 'line' ? ' ' : '：'}<span class="txt">${esc(c.text)}</span>`
+    if (kind === 'line') { div.style.borderColor = col; div.style.background = tint(col, .14) }
+  }
+  if (kind === 'line') { lastLine[c.from] = { text: c.text, t: Date.now() }; render() }
+  $('chat').appendChild(div)
+  $('chat').scrollTop = 1e9
+}
+
+$('say').onsubmit = async (e) => {
+  e.preventDefault()
+  const text = $('sayText').value.trim()
+  if (!text || !seatToken) return
+  $('sayText').value = ''
+  await api('say', { text })
+}
+if (watchToken) $('say').style.display = 'none'
+
+function nameAtL(l) { return view?.seats.find((s) => s.l === l) }
+
+/** 和了 / 流局结算卡：点一下或 8 秒后收起。 */
+let cardTimer = null
+function showCard(html) {
+  const el = $('card')
+  el.innerHTML = `<div class="box">${html}<div class="foot">点任意处收起</div></div>`
+  el.hidden = false
+  clearTimeout(cardTimer)
+  cardTimer = setTimeout(() => { el.hidden = true }, 8000)
+}
+$('card').onclick = () => { $('card').hidden = true }
+function huleCard(h) {
+  const who = nameAtL(h.l), from = h.baojia == null ? null : nameAtL(h.baojia)
+  const yaku = (h.hupai || []).map((x) => `<span>${esc(x.name)}</span><span class="f">${typeof x.fanshu === 'string' ? '役满' : x.fanshu + ' 番'}</span>`).join('')
+  const fan = h.damanguan ? `${h.damanguan > 1 ? h.damanguan + ' 倍' : ''}役满` : `${h.fu} 符 ${h.fanshu} 番`
+  const hand = parseShoupai(h.shoupai).map((p) => `<span class="t" style="background-image:url(${tileURL(p)})"></span>`).join('')
+  showCard(`<h3>${nameHtml(who?.name, who?.id)} ${from ? `荣和 <span class="dim">←</span> ${nameHtml(from.name, from.id)}` : '自摸'}</h3>
+    <div class="hl">${hand}</div>
+    <div class="yaku">${yaku}</div>
+    <div><span class="big">${h.defen}</span> 点 <span class="dim">· ${fan}</span></div>`)
+}
+
+// ---------- 声音设置：音效、BGM、立直彩蛋各自开关，音效和 BGM 音量分开调，都记在浏览器本地 ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v } catch { return d } },
+  set(k, v) { try { localStorage.setItem(k, String(v)) } catch {} },
+}
+let muted = store.get('riichi-mute', '0') === '1' // 音效（立直彩蛋也跟着它）
+let sfxVol = Math.min(1, Math.max(0, +store.get('riichi-sfx-vol', '0.8') || 0))
+let bgmOff = store.get('riichi-bgm-mute', '0') === '1'
+let bgmVol = Math.min(1, Math.max(0, +store.get('riichi-bgm-vol', '0.5') || 0))
+let eggs = [], eggOn = store.get('riichi-eggs', '1') !== '0', egg = null
+let bgmFileCount = 0 // 服务端 $DSH_HOME/dsh-riichi/bgm/ 里的曲子数；0 = 用合成的
+function renderSound() {
+  $('soundBtn').textContent = muted && bgmOff ? '🔇 声音' : '🔊 声音'
+  $('sfxT').textContent = muted ? '关' : '开'; $('sfxT').classList.toggle('off', muted)
+  $('bgmT').textContent = bgmOff ? '关' : '开'; $('bgmT').classList.toggle('off', bgmOff)
+  $('eggT').textContent = eggOn ? '开' : '关'; $('eggT').classList.toggle('off', !eggOn)
+  $('sfxV').value = sfxVol; $('bgmV').value = bgmVol
+  $('eggRow').hidden = !eggs.length
+  $('bgmSrc').textContent = bgmFileCount ? `BGM：放你 bgm 文件夹里的 ${bgmFileCount} 首（随机循环）` : 'BGM：网页现场合成（雀庄电钢琴）'
+}
+$('soundBtn').onclick = (e) => { e.stopPropagation(); $('soundPanel').hidden = !$('soundPanel').hidden }
+$('soundPanel').onclick = (e) => e.stopPropagation()
+addEventListener('click', () => { $('soundPanel').hidden = true })
+$('sfxT').onclick = () => {
+  muted = !muted; store.set('riichi-mute', muted ? '1' : '0'); renderSound()
+  if (muted) stopEgg(0.2); else sfx('chi')
+}
+$('sfxV').oninput = () => {
+  sfxVol = +$('sfxV').value; store.set('riichi-sfx-vol', sfxVol)
+  if (actx) actx.master.gain.setTargetAtTime(0.35 * sfxVol, actx.currentTime, 0.05)
+  if (egg) fadeTo(egg.a, 0.6 * sfxVol, 0.2)
+}
+$('sfxV').onchange = () => { if (!muted) sfx('chi') }
+$('bgmT').onclick = () => {
+  bgmOff = !bgmOff; store.set('riichi-bgm-mute', bgmOff ? '1' : '0'); renderSound()
+  if (bgmOff) bgmStop(0.6); else bgmStart()
+}
+$('bgmV').oninput = () => { bgmVol = +$('bgmV').value; store.set('riichi-bgm-vol', bgmVol); bgmVolume() }
+$('eggT').onclick = () => {
+  eggOn = !eggOn; store.set('riichi-eggs', eggOn ? '1' : '0'); renderSound()
+  if (!eggOn) stopEgg(0.2)
+}
+renderSound()
+
+// ---------- 立直彩蛋音乐（主人 10-28 晚要的梗）：别人立直放一首，自己立直放另一首 ----------
+// 曲子在插件的 彩蛋/（或 $DSH_HOME/dsh-riichi/彩蛋/ 覆盖），服务端从 egg/<key> 放出来。
+// 立直的那一局一直循环放，和了或流局时淡出；自己立直优先（别人的在放时自己立直就换歌，反过来不换）。
+// 音效开关和音量也管它；另有“立直彩蛋”开关单独关。彩蛋在放时 BGM 让开（淡出），停了再回来。
+function fadeTo(a, v, sec, done) {
+  clearInterval(a._fade)
+  const step = (v - a.volume) / Math.max(1, sec * 20)
+  a._fade = setInterval(() => {
+    const nv = a.volume + step
+    if ((step >= 0 && nv >= v) || (step < 0 && nv <= v)) { a.volume = Math.max(0, Math.min(1, v)); clearInterval(a._fade); if (done) done() }
+    else a.volume = Math.max(0, Math.min(1, nv))
+  }, 50)
+}
+function playEgg(key) {
+  if (muted || !eggOn || !eggs.includes(key)) return
+  if (egg && (egg.key === key || egg.key === 'self')) return
+  stopEgg(0.4)
+  const a = new Audio(`${base}egg/${key}?${seatToken ? 't=' + encodeURIComponent(seatToken) : 'w=' + encodeURIComponent(watchToken)}`)
+  a.loop = true
+  a.volume = 0
+  a.play().then(() => fadeTo(a, 0.6 * sfxVol, 0.8)).catch(() => {}) // 页面还没点过时浏览器不让放，算了
+  egg = { key, a }
+  bgmDuck(true)
+}
+function stopEgg(sec = 1.2) {
+  if (!egg) return
+  const a = egg.a
+  egg = null
+  fadeTo(a, 0, sec, () => { a.pause(); a.src = '' })
+  bgmDuck(false)
+}
+let actx = null
+/** 音频环境：音效和 BGM 共用一个 AudioContext，各走各的总音量。 */
+function ctx() {
+  try {
+    if (!actx) {
+      actx = new (window.AudioContext || window.webkitAudioContext)()
+      const master = actx.createGain(); master.gain.value = 0.35 * sfxVol; master.connect(actx.destination); actx.master = master
+      const bm = actx.createGain(); bm.gain.value = BGM_SCALE * bgmVol; bm.connect(actx.destination); actx.bgmMaster = bm
+    }
+    if (actx.state === 'suspended') actx.resume()
+    return actx
+  } catch { return null }
+}
+function audio() { return muted ? null : ctx() }
+// 浏览器要等用户点过页面才让出声：第一次点击时把音频解锁，顺便把 BGM 放起来
+// 进页面就默认开着：先直接试着出声（浏览器放行的话不用点）。浏览器的规矩是没跟页面交互过不让出声，
+// 被拦住时右上角冒一个“点一下开声音”，页面上任何一次点击/按键（比如大厅里点“准备”）都会解锁，不用专门去点。
+let unlocked = false
+function unlock() {
+  const a = ctx()
+  if (!a) return
+  const done = () => {
+    if (unlocked) return
+    unlocked = true
+    $('soundHint').hidden = true
+    for (const ev of ['pointerdown', 'keydown', 'touchstart']) removeEventListener(ev, unlock, true)
+    bgmStart()
+  }
+  if (a.state === 'running') done()
+  else a.resume().then(() => { if (a.state === 'running') done() }).catch(() => {})
+}
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, unlock, true)
+setTimeout(() => { unlock(); setTimeout(() => { if (!unlocked) $('soundHint').hidden = false }, 400) }, 0)
+
+// ---------- BGM ----------
+// 默认在网页里现场合成，零体积、没版权问题：雀庄那种轻松氛围——慢速电钢琴（FM 合成的 Rhodes）和弦、柔和贝斯、
+// 很轻的刷子鼓和沙锤、一段五声音阶的旋律主题。和弦进行每 4 小节随机换一组，旋律主题每段随机变奏（移位、错半拍、
+// 稀疏、有时干脆不唱），鼓有时只剩沙锤或停掉，听不出明显的重复，一直接着排所以无缝循环。
+// 有人立直：下一小节起换成小调那几组进行，速度从 84 提到 96，沙锤改十六分、底鼓每拍一下，贝斯改八分音推着走。
+// 立直彩蛋在放时 BGM 淡出让位（不打架），彩蛋停了再淡入。和了、流局：放一小段收尾（IV→I 琶音），下一局开始再接上。
+// 主人在 $DSH_HOME/dsh-riichi/bgm/ 放了 mp3/ogg 的话，改成随机循环放那些文件（服务端 bgm/<编号>），不合成。
+const BGM_SCALE = 0.42 // 合成 BGM 总音量（再乘音量滑块，默认 0.5）：要低，垫在下面
+const mtof = (m) => 440 * 2 ** ((m - 69) / 12)
+// 和弦：[贝斯根音, 电钢琴配置]（F 大调）
+const CH = {
+  Fmaj9: [41, [57, 60, 64, 67]], Dm9: [38, [53, 57, 60, 64]], Gm9: [43, [58, 62, 65, 69]], C9sus: [36, [58, 62, 65, 67]],
+  Bbmaj9: [46, [57, 60, 62, 65]], Am7: [45, [55, 60, 64, 69]], C13: [36, [58, 64, 67, 69]], Ebmaj9: [39, [55, 58, 62, 65]],
+  A7b13: [45, [55, 61, 64, 65]], Dm7: [38, [53, 57, 60, 65]], Gm7: [43, [53, 58, 62, 65]],
+}
+// 每组 4 小节；一个小节可以是两个和弦（各占半小节）
+const RELAX = [
+  ['Fmaj9', 'Dm9', 'Gm9', 'C9sus'], ['Bbmaj9', 'Am7', 'Dm9', ['Gm9', 'C13']], ['Fmaj9', 'Am7', 'Bbmaj9', 'C13'],
+  ['Dm9', 'Gm9', 'C9sus', 'Fmaj9'], ['Bbmaj9', 'C13', 'Am7', 'Dm9'], ['Fmaj9', 'Ebmaj9', 'Bbmaj9', 'C9sus'],
+]
+const TENSE = [['Dm9', 'Bbmaj9', 'Gm9', 'A7b13'], ['Dm7', 'Gm7', 'Ebmaj9', 'A7b13'], ['Gm9', 'A7b13', 'Dm9', ['Gm7', 'A7b13']]]
+const PENTA = [62, 65, 67, 69, 72, 74, 77, 79, 81, 84] // D F G A C D F G A C（F 大调五声）
+// 旋律主题：两小节一句，[拍, 五声音阶上的步数, 时值]；变奏都从这两句来
+const THEME = [[[0, 0, 1], [1, 1, 0.5], [1.5, 2, 1.5], [3, 1, 1]], [[0.5, 3, 0.5], [1, 2, 1], [2, 0, 0.5], [2.5, -1, 1.5]]]
+const COMP = [[[0, 3.6]], [[0, 1.4], [1.5, 2.2]], [[0, 0.9], [2.5, 1.2]], [[0.5, 1.2], [2, 1.8]], [[0, 0.5], [1.5, 0.5], [3, 0.9]]]
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
+
+const bgm = { running: false, mode: null, bus: null, nextBar: 0, timer: null, queue: [], tense: false, resting: false, ducked: false, lastProg: null, noise: null, file: null, order: [] }
+
+function bgmShouldPlay() { return unlocked && !bgmOff && (roomStatus === 'lobby' || roomStatus === 'playing') }
+
+function bgmStart() {
+  if (bgm.running || !bgmShouldPlay()) return
+  const a = ctx()
+  if (!a) return
+  bgm.running = true
+  bgm.resting = false
+  if (bgmFileCount) { bgm.mode = 'file'; bgmNextFile(); return }
+  bgm.mode = 'synth'
+  if (!bgm.noise) {
+    const n = a.sampleRate, buf = a.createBuffer(1, n, n), ch = buf.getChannelData(0)
+    for (let i = 0; i < n; i++) ch[i] = Math.random() * 2 - 1
+    bgm.noise = buf
+  }
+  const bus = a.createGain(), lp = a.createBiquadFilter()
+  lp.type = 'lowpass'; lp.frequency.value = 5200
+  bus.gain.setValueAtTime(0.0001, a.currentTime)
+  bus.connect(lp); lp.connect(a.bgmMaster)
+  bus.gain.exponentialRampToValueAtTime(bgm.ducked ? 0.0001 : 1, a.currentTime + 1.5)
+  bgm.bus = bus
+  bgm.queue = []
+  bgm.nextBar = a.currentTime + 0.15
+  bgm.timer = setInterval(bgmTick, 200)
+  bgmTick()
+}
+
+function bgmStop(sec = 1) {
+  if (!bgm.running) return
+  bgm.running = false
+  clearInterval(bgm.timer); bgm.timer = null
+  if (bgm.mode === 'file' && bgm.file) { const f = bgm.file; bgm.file = null; fadeTo(f, 0, sec, () => { f.pause(); f.src = '' }) }
+  if (bgm.bus && actx) {
+    const bus = bgm.bus
+    bus.gain.cancelScheduledValues(actx.currentTime)
+    bus.gain.setTargetAtTime(0.0001, actx.currentTime, sec / 4)
+    setTimeout(() => bus.disconnect(), sec * 1000 + 3000)
+  }
+  bgm.bus = null
+}
+
+function bgmVolume() {
+  if (actx) actx.bgmMaster.gain.setTargetAtTime(BGM_SCALE * bgmVol, actx.currentTime, 0.1)
+  if (bgm.file && !bgm.ducked) fadeTo(bgm.file, 0.5 * bgmVol, 0.2)
+}
+
+/** 立直彩蛋放的时候 BGM 让开。 */
+function bgmDuck(on) {
+  bgm.ducked = on
+  if (!bgm.running) return
+  if (bgm.bus && actx) bgm.bus.gain.setTargetAtTime(on ? 0.0001 : 1, actx.currentTime, on ? 0.2 : 0.6)
+  if (bgm.file) {
+    if (on) fadeTo(bgm.file, 0, 0.6, () => { if (bgm.ducked && bgm.file) bgm.file.pause() })
+    else { bgm.file.play().catch(() => {}); fadeTo(bgm.file, 0.5 * bgmVol, 1.5) }
+  }
+}
+
+/** 自定义 BGM：随机放下一首（不连着放同一首），放完接着换。 */
+function bgmNextFile() {
+  if (!bgm.running) return
+  if (!bgm.order.length) {
+    bgm.order = [...Array(bgmFileCount).keys()].sort(() => Math.random() - 0.5)
+    if (bgm.order.length > 1 && bgm.order[0] === bgm.last) bgm.order.push(bgm.order.shift())
+  }
+  const i = bgm.order.shift()
+  bgm.last = i
+  const f = new Audio(`${base}bgm/${i}?${seatToken ? 't=' + encodeURIComponent(seatToken) : 'w=' + encodeURIComponent(watchToken)}`)
+  f.volume = 0
+  f.onended = () => { if (bgm.file === f) bgmNextFile() }
+  f.onerror = () => { if (bgm.file === f) setTimeout(bgmNextFile, 1000) }
+  bgm.file = f
+  if (!bgm.ducked) f.play().then(() => fadeTo(f, 0.5 * bgmVol, 1.5)).catch(() => {})
+}
+
+/** 一局开始：放松模式、接着排小节。 */
+function bgmNewHand() {
+  bgm.tense = false
+  if (!bgm.running) { bgmStart(); return }
+  if (bgm.mode !== 'synth' || !bgm.resting) return
+  bgm.resting = false
+  bgm.queue = []
+  bgm.nextBar = Math.max(actx.currentTime + 0.2, bgm.nextBar)
+  bgm.timer = bgm.timer || setInterval(bgmTick, 200)
+}
+
+/** 和了、流局：合成的放一小段收尾，然后歇着等下一局；自定义的文件不停。 */
+function bgmCadence(final = false) {
+  if (!bgm.running || bgm.mode !== 'synth' || bgm.resting) { if (final) bgmStop(2); return }
+  bgm.resting = true
+  clearInterval(bgm.timer); bgm.timer = null
+  const a = actx
+  // 已经排好的小节还会响完；收尾接在后面，彩蛋刚淡出的话再晚一点
+  const t = Math.max(a.currentTime + (egg ? 1.2 : 0.15), Math.min(bgm.nextBar, a.currentTime + 1.5))
+  const beat = 60 / 84
+  CH.Bbmaj9[1].forEach((m, k) => rhodes(t + k * 0.09, m, beat * 2, 0.07))
+  bass(t, CH.Bbmaj9[0], beat * 2, 0.26)
+  CH.Fmaj9[1].concat([72]).forEach((m, k) => rhodes(t + beat * 2 + k * 0.11, m, beat * 4, 0.075))
+  bass(t + beat * 2, CH.Fmaj9[0], beat * 4, 0.28)
+  rhodes(t + beat * 2 + 0.5, 77, beat * 4, 0.09)
+  brush(t + beat * 2, 0.03)
+  if (final) setTimeout(() => bgmStop(2), (t - a.currentTime + beat * 6) * 1000)
+}
+
+function bgmTick() {
+  if (!bgm.running || bgm.mode !== 'synth' || bgm.resting || !actx) return
+  while (bgm.nextBar < actx.currentTime + 1.8) {
+    if (!bgm.queue.length) bgmSection()
+    const b = bgm.queue.shift()
+    bgmBar(b, bgm.nextBar)
+    bgm.nextBar += 4 * 60 / (b.tense ? 96 : 84)
+  }
+}
+
+/** 排一段（4 小节）：和弦进行、旋律变奏、鼓的密度都随机，避开上一段的进行。 */
+function bgmSection() {
+  const tense = bgm.tense
+  let prog
+  do { prog = pick(tense ? TENSE : RELAX) } while (prog === bgm.lastProg && (tense ? TENSE : RELAX).length > 1)
+  bgm.lastProg = prog
+  const mel = tense ? pick(['none', 'none', 'sparse']) : pick(['theme', 'theme', 'shift', 'up', 'sparse', 'none'])
+  const drums = tense ? 'tense' : pick(['full', 'full', 'full', 'light', 'none'])
+  prog.forEach((c, k) => bgm.queue.push({ chords: Array.isArray(c) ? c : [c], k, mel, drums, tense }))
+}
+
+/** 一小节：电钢琴、贝斯、鼓、旋律。 */
+function bgmBar(b, t0) {
+  const beat = 60 / (b.tense ? 96 : 84)
+  const half = b.chords.length > 1
+  b.chords.forEach((name, j) => {
+    const [root, voicing] = CH[name]
+    const ts = t0 + j * beat * 2, span = half ? 2 : 4
+    // 电钢琴：随机挑一种节奏型，两和弦的小节只在开头弹
+    const pat = half ? [[0, 1.8]] : b.tense ? pick([COMP[2], COMP[4]]) : pick(COMP)
+    for (const [at, d] of pat) voicing.forEach((m, k) => rhodes(ts + at * beat + k * 0.012, m, d * beat, b.tense ? 0.06 : 0.07))
+    // 贝斯：放松时 1、3 拍（偶尔第 4 拍半音接下一个根音）；紧张时八分音推着走
+    if (b.tense) for (let i = 0; i < span * 2; i++) bass(ts + i * beat / 2, root + (i % 4 === 3 ? 12 : 0), beat * 0.42, 0.2)
+    else {
+      bass(ts, root, beat * (span === 4 ? 1.8 : 1.6), 0.28)
+      if (span === 4) bass(ts + 2 * beat, Math.random() < 0.5 ? root + 7 : root, beat * 1.3, 0.22)
+      if (span === 4 && Math.random() < 0.35) bass(ts + 3.5 * beat, root - 1, beat * 0.45, 0.16)
+    }
+  })
+  // 鼓：刷子 2、4 拍；沙锤八分摇摆（紧张时十六分）；底鼓很轻
+  if (b.drums !== 'none') {
+    if (b.drums !== 'light') { brush(t0 + beat, 0.045); brush(t0 + 3 * beat, 0.045) }
+    if (b.drums === 'tense') { for (let i = 0; i < 16; i++) shaker(t0 + i * beat / 4, i % 4 === 0 ? 0.03 : 0.016); for (let i = 0; i < 4; i++) kick(t0 + i * beat, 0.16) }
+    else {
+      for (let i = 0; i < 8; i++) shaker(t0 + (Math.floor(i / 2) + (i % 2 ? 0.62 : 0)) * beat, i % 2 ? 0.014 : 0.022)
+      if (b.drums === 'full') { kick(t0, 0.18); if (Math.random() < 0.5) kick(t0 + 2.5 * beat, 0.1) }
+    }
+  }
+  // 旋律：两小节一句的主题，按段落的变奏方式唱（第 3、4 小节重复前两小节的句子，但起音跟着和弦挪）
+  if (b.mel !== 'none') {
+    const phrase = THEME[b.k % 2]
+    const tones = new Set([CH[b.chords[0]][0], ...CH[b.chords[0]][1]].map((m) => m % 12))
+    let start = b.mel === 'up' ? 4 : 3
+    if (b.k >= 2) start += b.mel === 'up' ? 1 : -1
+    for (const [at, step, d] of phrase) {
+      if (b.mel === 'sparse' && Math.random() < 0.5) continue
+      const shift = b.mel === 'shift' ? 0.5 : 0
+      let idx = Math.max(0, Math.min(PENTA.length - 1, start + step))
+      // 重拍上落在和弦音上（往旁边找最近的和弦音）
+      if (Number.isInteger(at + shift) && !tones.has(PENTA[idx] % 12)) {
+        const near = [idx - 1, idx + 1].find((x) => PENTA[x] && tones.has(PENTA[x] % 12))
+        if (near != null) idx = near
+      }
+      if (at + shift >= 4) continue
+      rhodes(t0 + (at + shift) * beat, PENTA[idx] + 12, d * beat, 0.085, true)
+    }
+  }
+}
+
+// 音色：FM 电钢琴（载波 + 1:1 调制，调制深度很快衰减 = 敲击时亮、之后变圆）、加一点轻颤音
+function rhodes(t, midi, dur, v, lead = false) {
+  const a = actx, f = mtof(midi)
+  const o = a.createOscillator(), m = a.createOscillator(), mg = a.createGain(), g = a.createGain()
+  o.frequency.value = f; m.frequency.value = f * (lead ? 2 : 1)
+  mg.gain.setValueAtTime(f * (lead ? 0.8 : 1.4), t); mg.gain.exponentialRampToValueAtTime(f * 0.08, t + 0.7)
+  m.connect(mg); mg.connect(o.frequency)
+  const end = t + dur + 0.9
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.008)
+  g.gain.exponentialRampToValueAtTime(v * 0.4, t + Math.min(dur, 0.8)); g.gain.setValueAtTime(v * 0.4, t + dur)
+  g.gain.exponentialRampToValueAtTime(0.0001, end)
+  o.connect(g); g.connect(bgm.bus)
+  o.start(t); m.start(t); o.stop(end); m.stop(end)
+}
+function bass(t, midi, dur, v) {
+  const a = actx, o = a.createOscillator(), o2 = a.createOscillator(), lp = a.createBiquadFilter(), g = a.createGain()
+  o.frequency.value = mtof(midi); o2.type = 'triangle'; o2.frequency.value = mtof(midi)
+  lp.type = 'lowpass'; lp.frequency.value = 520
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.025)
+  g.gain.exponentialRampToValueAtTime(v * 0.55, t + dur * 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.15)
+  o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(bgm.bus)
+  o.start(t); o2.start(t); o.stop(t + dur + 0.2); o2.stop(t + dur + 0.2)
+}
+function noiseHit(t, { f, type, q = 0.7, attack, decay, v }) {
+  const a = actx, s = a.createBufferSource(), fl = a.createBiquadFilter(), g = a.createGain()
+  s.buffer = bgm.noise; fl.type = type; fl.frequency.value = f; fl.Q.value = q
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay)
+  s.connect(fl); fl.connect(g); g.connect(bgm.bus)
+  s.start(t, Math.random() * 0.5); s.stop(t + attack + decay + 0.05)
+}
+const brush = (t, v) => noiseHit(t, { f: 3800, type: 'bandpass', q: 0.6, attack: 0.04, decay: 0.28, v })
+const shaker = (t, v) => noiseHit(t, { f: 7500, type: 'highpass', attack: 0.012, decay: 0.05, v })
+function kick(t, v) {
+  const a = actx, o = a.createOscillator(), g = a.createGain()
+  o.frequency.setValueAtTime(75, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.22)
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3)
+  o.connect(g); g.connect(bgm.bus); o.start(t); o.stop(t + 0.32)
+}
+function tone(a, { f = 440, f2 = null, type = 'sine', t = 0, d = 0.3, v = 0.5, attack = 0.005 }) {
+  const o = a.createOscillator(), g = a.createGain(), at = a.currentTime + t
+  o.type = type; o.frequency.setValueAtTime(f, at)
+  if (f2) o.frequency.exponentialRampToValueAtTime(f2, at + d)
+  g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(v, at + attack); g.gain.exponentialRampToValueAtTime(0.0001, at + d)
+  o.connect(g); g.connect(a.master); o.start(at); o.stop(at + d + 0.05)
+}
+function noise(a, { t = 0, d = 0.05, v = 0.5, f = 2400, q = 1.2 }) {
+  const n = Math.ceil(a.sampleRate * d), buf = a.createBuffer(1, n, a.sampleRate), ch = buf.getChannelData(0)
+  for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 2
+  const s = a.createBufferSource(), bp = a.createBiquadFilter(), g = a.createGain(), at = a.currentTime + t
+  s.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q; g.gain.value = v
+  s.connect(bp); bp.connect(g); g.connect(a.master); s.start(at)
+}
+/** 牌碰牌的“咔”一声。 */
+function clack(a, t = 0, v = 0.7) { noise(a, { t, d: 0.045, v, f: 2600, q: 1.5 }); tone(a, { f: 1250, f2: 900, type: 'triangle', t, d: 0.07, v: v * 0.35 }) }
+function sfx(kind) {
+  const a = audio()
+  if (!a) return
+  // 小音效：鼠标移到能打的牌上、点按钮选操作、有人打出一张牌（自己的响一点）
+  if (kind === 'hover') tone(a, { f: 1900, type: 'triangle', d: 0.035, v: 0.05 })
+  if (kind === 'select') { tone(a, { f: 880, f2: 1320, type: 'triangle', d: 0.07, v: 0.16 }); noise(a, { d: 0.02, v: 0.15, f: 4000 }) }
+  if (kind === 'dapai') clack(a, 0, 0.32)
+  if (kind === 'dapai-me') clack(a, 0, 0.55)
+  if (kind === 'canwin') { [1046, 1318, 1568, 2093].forEach((f, k) => tone(a, { f, t: k * 0.06, d: 0.6, v: 0.18, type: 'triangle' })); noise(a, { t: 0.05, d: 0.4, v: 0.12, f: 6000, q: 0.5 }) } // 能和了的提示音
+  if (kind === 'chi') { clack(a); tone(a, { f: 660, t: 0.05, d: 0.12, v: 0.25, type: 'triangle' }); tone(a, { f: 880, t: 0.12, d: 0.18, v: 0.25, type: 'triangle' }) }
+  if (kind === 'peng') { clack(a); clack(a, 0.08); tone(a, { f: 523, t: 0.1, d: 0.25, v: 0.3, type: 'square' }) }
+  if (kind === 'gang') { clack(a); clack(a, 0.07); clack(a, 0.14); tone(a, { f: 160, f2: 60, t: 0.16, d: 0.45, v: 0.7 }); tone(a, { f: 392, t: 0.18, d: 0.35, v: 0.2, type: 'square' }) }
+  if (kind === 'lizhi') {
+    tone(a, { f: 380, f2: 1250, type: 'triangle', d: 0.26, v: 0.35 })
+    for (const [f, t] of [[1320, 0.24], [1980, 0.24], [2640, 0.3]]) tone(a, { f, t, d: 1.0, v: 0.18 })
+    clack(a, 0.24, 0.5)
+  }
+  if (kind === 'rong') {
+    tone(a, { f: 110, f2: 45, d: 0.6, v: 0.9 }); noise(a, { d: 0.35, v: 0.5, f: 700, q: 0.6 })
+    for (const f of [440, 554, 659, 880]) tone(a, { f, t: 0.08, d: 1.3, v: 0.16, type: 'sawtooth', attack: 0.01 })
+    tone(a, { f: 1760, t: 0.08, d: 1.2, v: 0.08 })
+  }
+  if (kind === 'zimo') {
+    [660, 880, 1100, 1320, 1760].forEach((f, k) => tone(a, { f, t: k * 0.07, d: 0.9, v: 0.2, type: 'triangle' }))
+    tone(a, { f: 220, t: 0.3, d: 1.1, v: 0.35 }); noise(a, { t: 0.3, d: 0.6, v: 0.18, f: 5000, q: 0.4 })
+  }
+}
+/** 在某一家的座位上弹一个大字（吃、碰、杠、立直、荣和、自摸），和了再加全屏闪光、桌子一震。 */
+function fx(kind, seatId, sub) {
+  const WORD = { chi: '吃', peng: '碰', gang: '杠', lizhi: '立直', rong: '荣和', zimo: '自摸' }
+  const el = document.querySelector(`.seat[data-id="${seatId}"]`)
+  const r = el ? el.getBoundingClientRect() : { left: innerWidth / 2 - 100, top: innerHeight / 2 - 50, width: 200, height: 100 }
+  const x = r.left + Math.min(r.width, innerWidth) / 2, y = Math.min(Math.max(r.top + r.height / 2, 70), innerHeight - 70)
+  const big = kind === 'rong' || kind === 'zimo'
+  const col = colorOf(seatId)
+  const w = document.createElement('div')
+  w.className = `fx-word ${big ? 'big' : ''} ${kind === 'lizhi' ? 'lizhi' : ''}`
+  w.style.left = x + 'px'; w.style.top = y + 'px'
+  w.style.setProperty('--glow', tint(col, .9))
+  w.innerHTML = esc(WORD[kind]) + (sub ? `<span class="sub">${sub}</span>` : '')
+  $('fx').appendChild(w)
+  const ring = document.createElement('div')
+  ring.className = 'fx-ring'; ring.style.left = x + 'px'; ring.style.top = y + 'px'; ring.style.borderColor = kind === 'lizhi' ? '#ff6a5c' : col
+  $('fx').appendChild(ring)
+  const parts = [w, ring]
+  if (kind === 'lizhi') {
+    const st = document.createElement('div')
+    st.className = 'fx-stick'; st.style.left = x + 'px'; st.style.top = (y + 62) + 'px'
+    $('fx').appendChild(st); parts.push(st)
+  }
+  if (big || kind === 'lizhi') {
+    const f = $('flash')
+    f.style.background = kind === 'lizhi'
+      ? `radial-gradient(circle at ${x}px ${y}px, rgba(255,106,92,.35), transparent 55%)`
+      : `radial-gradient(circle at ${x}px ${y}px, rgba(255,236,170,.75), rgba(233,185,73,.25) 35%, transparent 70%)`
+    f.classList.remove('on'); void f.offsetWidth; f.classList.add('on')
+  }
+  if (big) { const t = $('table'); t.classList.remove('shake'); void t.offsetWidth; t.classList.add('shake') }
+  setTimeout(() => parts.forEach((p) => p.remove()), 1500)
+  sfx(kind)
+}
+/** 引擎消息 → 要不要放特效。只在实时的 msg 里放（重连补发的 log 不放）。 */
+function fxFor(m) {
+  const idAt = (l) => nameAtL(l)?.id
+  if (m.fulou) {
+    const nums = (m.fulou.m.match(/\d/g) || []).map((n) => (n === '0' ? '5' : n))
+    fx(nums.length === 4 ? 'gang' : new Set(nums).size === 1 ? 'peng' : 'chi', idAt(m.fulou.l))
+  } else if (m.gang) fx('gang', idAt(m.gang.l))
+  else if (m.dapai && m.dapai.p.includes('*')) fx('lizhi', idAt(m.dapai.l))
+  else if (m.hule) {
+    const from = m.hule.baojia == null ? null : nameAtL(m.hule.baojia)
+    fx(m.hule.baojia == null ? 'zimo' : 'rong', idAt(m.hule.l), `${m.hule.defen} 点${from ? ' ← ' + esc(from.name) : ''}`)
+  }
+}
+
+// ---------- 结束对局（只有主人的座位能点） ----------
+let roomStatus = null
+function renderEndBtn() {
+  const me = lobby && lobby.seats.find((s) => s.id === mySeat)
+  // 只有房主本人能结束整桌（联机时朋友本人也是真人座位，但不是房主）
+  $('endBtn').hidden = !(seatToken && me && me.host && (roomStatus === 'playing' || roomStatus === 'lobby'))
+}
+$('endBtn').onclick = () => {
+  const c = $('confirm')
+  c.innerHTML = `<div class="box"><h3 style="margin:0 0 8px">结束这一桌？</h3>
+    <div>牌局会直接中止，按中止存一份战绩，桌上所有人都会看到“结束了对局”。结束后还能在这里聊天。</div>
+    <div class="row"><button class="btn" id="cNo">再想想</button><button class="btn danger" id="cYes">结束对局</button></div></div>`
+  c.hidden = false
+  $('cNo').onclick = () => { c.hidden = true }
+  $('cYes').onclick = async () => {
+    c.hidden = true
+    const r = await api('close', {})
+    if (r.status !== 200) chatLine({ from: -1, kind: 'system', warn: true, text: '没结束成：' + (r.body.error || r.status) })
+  }
+}
+
+function connect() {
+  const url = seatToken ? `${base}seat/events?t=${encodeURIComponent(seatToken)}` : `${base}watch/events?w=${encodeURIComponent(watchToken)}`
+  const es = new EventSource(url)
+  es.addEventListener('sync', (e) => {
+    const d = JSON.parse(e.data)
+    mySeat = d.seat
+    lobby = d.lobby
+    colors = d.lobby ? d.lobby.seats.map((s) => s.color) : (d.room.colors || [])
+    $('title').innerHTML = `房间 <b>${code}</b> · ${d.watching ? '旁观 ' : ''}${nameHtml(d.name, d.seat)} · ${esc(d.room.settings.length)}战 ${esc(d.room.settings.rules)}`
+    $('chat').innerHTML = ''
+    d.chat.forEach(chatLine)
+    decision = d.decision
+    setView(d.view)
+    roomStatus = d.room.status
+    eggs = d.eggs || []
+    bgmFileCount = d.bgm || 0
+    renderLobby(); render(); renderDecision(); renderEndBtn(); renderSound(); tickClocks()
+    if (roomStatus === 'lobby' || roomStatus === 'playing') bgmStart(); else bgmStop(0.5)
+    $('status').textContent = roomStatus === 'ended' || roomStatus === 'aborted' ? '这一桌结束了（还能聊天）' : ''
+  })
+  es.addEventListener('lobby', (e) => {
+    lobby = JSON.parse(e.data)
+    roomStatus = lobby.status
+    renderEndBtn()
+    colors = lobby.seats.map((s) => s.color)
+    const me = lobby.seats.find((s) => s.id === mySeat)
+    if (me) $('title').innerHTML = $('title').innerHTML.replace(/<span class="nm"[^>]*>.*?<\/span>/, nameHtml(me.name, me.id))
+    // 正在大厅里编辑昵称时别把输入框冲掉
+    const editing = document.activeElement && ['myName', 'myColor'].includes(document.activeElement.id)
+    if (!editing || lobby.status !== 'lobby') renderLobby()
+  })
+  es.addEventListener('msg', (e) => {
+    const d = JSON.parse(e.data)
+    setView(d.view)
+    if (d.decision) decision = d.decision
+    if (d.decision && d.decision.options.some((o) => o.kind === 'hule')) sfx('canwin')
+    render(); renderDecision(); tickClocks()
+    const m = d.msg
+    if (m.qipai) chatLine({ from: -1, kind: 'table', text: `${view.round} ${view.changbang}本场 开始` })
+    if (m.dapai && m.dapai.p.includes('*')) chatLine({ from: -1, kind: 'table', text: `${nameAtL(m.dapai.l)?.name} 立直` })
+    if (m.hule) chatLine({ from: -1, kind: 'table', text: `${nameAtL(m.hule.l)?.name} ${m.hule.baojia == null ? '自摸' : '荣和'} ${m.hule.defen} 点（${(m.hule.hupai || []).map((x) => x.name).join('、')}）` })
+    if (m.pingju) chatLine({ from: -1, kind: 'table', text: `流局：${m.pingju.name}` })
+    try { fxFor(m) } catch (err) { console.warn('fx', err) }
+    // 打牌声（立直那张有自己的立直音效，不叠）
+    if (m.dapai && !m.dapai.p.includes('*')) sfx(nameAtL(m.dapai.l)?.me ? 'dapai-me' : 'dapai')
+    // 立直彩蛋：自己（旁观时是被看的那一家）立直放“自己立直”，别人立直放“别人立直”；这一局结束淡出
+    if (m.dapai && m.dapai.p.includes('*')) { if (!bgm.tense) { bgm.tense = true; bgm.queue = [] } playEgg(nameAtL(m.dapai.l)?.me ? 'self' : 'other') }
+    if (m.hule || m.pingju || m.qipai) stopEgg(m.qipai ? 0.3 : 1.5)
+    // BGM：新一局接着放（放松模式），和了流局放一小段收尾；有人立直时上面已经把它切到紧张模式
+    if (m.qipai) bgmNewHand()
+    if (m.hule || m.pingju) bgmCadence()
+    // 和了先放完大字特效，再弹结算卡
+    if (m.hule) { const h = m.hule; setTimeout(() => huleCard(h), 1300) }
+    if (m.pingju) showCard(`<h3>流局</h3><div class="big" style="font-size:22px">${esc(m.pingju.name)}</div>`)
+  })
+  es.addEventListener('acted', () => { decision = null; lizhiMode = false; renderDecision(); render() })
+  es.addEventListener('chat', (e) => chatLine(JSON.parse(e.data)))
+  es.addEventListener('end', (e) => {
+    const d = JSON.parse(e.data)
+    // 不关事件流：终局后桌上还能聊天
+    $('status').textContent = '这一桌结束了（还能聊天）'
+    roomStatus = d.aborted ? 'aborted' : 'ended'
+    stopEgg()
+    if (d.aborted) bgmStop(1.5); else bgmCadence(true)
+    decision = null; lizhiMode = false
+    renderEndBtn(); render(); renderDecision()
+    $('lobby').hidden = true; $('table').hidden = false
+    if (d.aborted) return // 中止原因服务端已经写进聊天了（“这一桌结束了：…”）
+    const rows = [0, 1, 2, 3].sort((a, b) => d.rank[a] - d.rank[b]).map((id) => `${d.rank[id]} 位 ${nameHtml(d.names[id], id)} ${d.defen[id]}（${d.point[id]}）`)
+    $('decide').innerHTML = '<b>终局</b><br>' + rows.join('<br>')
+    chatLine({ from: -1, kind: 'table', text: '终局' })
+  })
+  es.onerror = () => { $('status').textContent = '断线了，正在重连…' }
+}
+setInterval(() => { if (decision && decision.deadline) renderDecision() }, 1000)
+// “思考中 N 秒 / 等待中 N 秒”：从服务端给的回合开始时间（view.actorSince / waitSince）算，按收到消息时的服务端时间校准本机时钟，
+// 重连时 sync 里带着原来的开始时间，所以接得上。只改这几个小字，不重画牌桌。
+let skew = 0
+function setView(v) { view = v; if (v && v.now) skew = Date.now() - v.now }
+function tickClocks() {
+  for (const el of document.querySelectorAll('.clk')) {
+    const since = view && view.phase === 'playing' && roomStatus === 'playing' ? (el.dataset.since === 'wait' ? view.waitSince : view.actorSince) : null
+    const secs = since ? Math.floor((Date.now() - skew - since) / 1000) : 0
+    const txt = secs >= 1 ? (el.dataset.fmt || ' {} 秒').replace('{}', secs) : ''
+    if (el.textContent !== txt) el.textContent = txt
+  }
+}
+setInterval(tickClocks, 500)
+setInterval(() => { if (Object.values(lastLine).some((x) => Date.now() - x.t < 13000)) render() }, 3000)
+connect()
+</script>
+</body>
+</html>

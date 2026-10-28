@@ -1,0 +1,7 @@
+node_modules/
+# 本机开发用的东西：有本机路径、读本机 DeepSeek 凭据，不公开
+开发笔记.md
+sync-to-desktop.sh
+real-deepseek.jsonl
+test/real-deepseek.mjs
+.riichi-seat.json

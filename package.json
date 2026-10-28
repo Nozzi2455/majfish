@@ -1,0 +1,40 @@
+{
+  "name": "majfish",
+  "version": "0.3.0",
+  "description": "DSH 立直麻将：主人 + 自家肥鱼 + 机器人，网页牌桌，局域网联机（朋友带着他们的肥鱼来打）",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "cordis", "mahjong", "riichi", "麻将", "日麻"],
+  "repository": { "type": "git", "url": "git+https://github.com/Nozzi2455/majfish.git" },
+  "homepage": "https://github.com/Nozzi2455/majfish#readme",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.mjs",
+    "lib/",
+    "web/",
+    "cli/",
+    "彩蛋/",
+    "AGENT.md",
+    "外部agent入座.md",
+    "联机说明.md",
+    "cordis.patch.yml",
+    "协议.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@kobalab/majiang-ai": "1.3.0",
+    "@kobalab/majiang-core": "1.4.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

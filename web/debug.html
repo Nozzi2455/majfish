@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>立直麻将 · 调试页</title>
+<style>
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#1f2328; --dim:#6b7280; --line:#e5e7eb; --ok:#1a7f37; --warn:#b54708 }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --card:#1f2228; --ink:#e8e6e1; --dim:#9aa1ab; --line:#30343b; --ok:#4cc26b; --warn:#f0a05a } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:14px/1.55 "Microsoft YaHei","PingFang SC",sans-serif }
+  h1 { font-size:18px; margin:0 0 4px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:12px 0 }
+  table { border-collapse:collapse; width:100%; margin:6px 0 }
+  td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; font-variant-numeric:tabular-nums }
+  .dim { color:var(--dim) } .ok { color:var(--ok) } .warn { color:var(--warn) }
+  .log { max-height:260px; overflow:auto; font-size:13px; white-space:pre-wrap }
+  button { padding:6px 12px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer }
+</style>
+</head>
+<body>
+<h1>立直麻将 · 调试页</h1>
+<div class="dim">只显示公开信息（分数、牌河、和了），不显示任何人的手牌。每秒刷新。</div>
+<p><button id="selftest">后台跑一局自测（3 个机器人 + 1 个走协议的测试客户端，东风战）</button> <span id="msg" class="dim"></span></p>
+<div id="rooms"></div>
+<script>
+const k = new URLSearchParams(location.search).get('k')
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]))
+const ago = (t) => t ? Math.round((Date.now() - t) / 1000) + ' 秒前' : ''
+const STATUS = { lobby: '<span class="warn">大厅（等准备）</span>', playing: '<span class="ok">进行中</span>', ended: '已结束', aborted: '<span class="warn">中止</span>' }
+const KIND = { bot: '机器人', human: '真人（浏览器）', agent: '肥鱼座位（协议客户端）', remote: '外部 agent（命令行）' }
+
+$('selftest').onclick = async () => {
+  $('msg').textContent = '开局中…'
+  const r = await fetch('/debug/selftest?k=' + encodeURIComponent(k), { method: 'POST' })
+  const d = await r.json()
+  $('msg').textContent = d.error ? '失败：' + d.error : `开好了，房间 ${d.code}`
+}
+
+async function tick() {
+  try {
+    const r = await fetch('/debug/state?k=' + encodeURIComponent(k))
+    if (!r.ok) { $('rooms').innerHTML = `<div class="card warn">读不到状态（${r.status}）</div>`; return }
+    const d = await r.json()
+    if (!d.rooms.length) { $('rooms').innerHTML = '<div class="card dim">还没有牌桌。</div>'; return }
+    $('rooms').innerHTML = d.rooms.slice().reverse().map((room) => `
+      <div class="card">
+        <div><b>房间 ${esc(room.code)}</b> · ${STATUS[room.status] || esc(room.status)} · ${esc(room.settings.length)}战 ${esc(room.settings.rules)}
+          · 机器人 ${esc(room.settings.botLevel)} · 思考档位 ${esc(room.settings.effort)} · ${room.settings.timeLimitSec ? '限时 ' + room.settings.timeLimitSec + ' 秒' : '不限时'}</div>
+        <div class="dim">${esc(room.round || '')} · 已打 ${room.hands} 局 · 余 ${room.paishu ?? '-'} 张 · 最近一手 ${ago(room.lastActionAt)}</div>
+        ${room.error ? `<div class="warn">${esc(room.error).slice(0, 300)}</div>` : ''}
+        <table><tr><th>座位</th><th>谁</th><th>类型</th><th>分数</th><th>连接</th><th>准备</th><th>决定次数</th><th>代打</th><th>在等它</th></tr>
+        ${room.seats.map((s) => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>${KIND[s.kind] || s.kind}${s.level ? '（' + esc(s.level) + '）' : ''}</td>
+          <td>${room.defen ? room.defen[s.id] : ''}${room.result ? '（' + room.result.rank[s.id] + ' 位）' : ''}</td>
+          <td>${s.kind === 'bot' ? '-' : s.connected ? '<span class="ok">在线</span>' : '<span class="warn">没连上</span>'}</td>
+          <td>${s.kind === 'bot' ? '-' : s.ready ? '<span class="ok">✓</span>' : '<span class="warn">没有</span>'}</td><td>${s.decisions ?? '-'}</td><td>${s.takeovers ?? '-'}</td><td>${s.waiting != null ? s.waiting + ' 秒' : ''}</td></tr>`).join('')}
+        </table>
+        <div class="log">${room.events.slice().reverse().map((e) => esc(new Date(e.t).toLocaleTimeString('zh-CN')) + '  ' + esc(e.text)).join('\n')}</div>
+      </div>`).join('')
+  } catch (e) { $('rooms').innerHTML = `<div class="card warn">牌桌服务连不上：${esc(e.message)}</div>` }
+}
+tick(); setInterval(tick, 1000)
+</script>
+</body>
+</html>
