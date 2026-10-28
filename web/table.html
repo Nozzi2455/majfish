@@ -50,6 +50,7 @@
   header .tools { margin-left:auto; display:flex; gap:8px }
   .btn.ghost { background:transparent; color:var(--dim); border:1px solid #3d6b4f; padding:3px 10px; font-size:13.5px }
   .btn.ghost:hover { color:var(--ink); border-color:var(--dim) }
+  .btn.ghost.on { color:var(--accent); border-color:var(--accent); background:rgba(233,185,73,.12); font-weight:700 }
   .btn.danger { background:var(--red); color:#fff; font-weight:700 }
   #soundPanel { position:fixed; top:44px; right:16px; z-index:18; background:var(--panel); border:1px solid #3d6b4f; border-radius:10px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.45); min-width:250px; animation:pop .15s }
   #soundPanel[hidden] { display:none }
@@ -161,6 +162,8 @@
   <span id="status" class="dim"></span>
   <span class="tools">
     <span id="soundHint" class="dim" style="font-size:12.5px;align-self:center" hidden>点一下页面就有声音</span>
+    <button class="btn ghost" id="autoQieBtn" title="轮到你时自动打出刚摸的牌；能和、能杠、能立直时停下来" hidden>自动摸切</button>
+    <button class="btn ghost" id="noCallBtn" title="别人打的牌能吃碰杠时自动跳过；能荣和时照样停下来" hidden>不吃碰杠</button>
     <button class="btn ghost" id="soundBtn" title="音效、BGM、立直彩蛋">🔊 声音</button>
     <button class="btn ghost" id="endBtn" hidden>结束对局</button>
   </span>
@@ -1029,7 +1032,39 @@ function fxFor(m) {
 
 // ---------- 结束对局（只有主人的座位能点） ----------
 let roomStatus = null
+// ---------- 自动摸切、不吃碰杠（10-29 主人要的；开关记在浏览器本地） ----------
+// 自动摸切：轮到你、只能打牌时自动打出刚摸的那张；能和、能杠、能立直、九种九牌都停下来。立直之后不开也自动摸切。
+// 不吃碰杠：别人打的牌能吃碰杠时自动跳过；能荣和（含抢杠）时照样停下来。
+let autoQie = store.get('riichi-auto-qie', '0') === '1'
+let noCall = store.get('riichi-no-call', '0') === '1'
+let autoTimer = null
+function renderAutoBtns() {
+  const show = !!seatToken && !watchToken && (roomStatus === 'playing' || roomStatus === 'lobby')
+  for (const [id, on] of [['autoQieBtn', autoQie], ['noCallBtn', noCall]]) { $(id).hidden = !show; $(id).classList.toggle('on', on) }
+}
+/** 这一手能不能自动答：能就返回选项编号，不能返回 null（让主人自己点）。 */
+function autoChoice(d) {
+  if (!d) return null
+  const kinds = new Set(d.options.map((o) => o.kind))
+  if (kinds.has('hule')) return null
+  if (kinds.has('skip')) return noCall ? d.options.find((o) => o.kind === 'skip').i : null
+  const me = view && view.seats && view.seats.find((s) => s.me)
+  if (!autoQie && !(me && me.lizhi)) return null
+  if ([...kinds].some((k) => k !== 'dapai')) return null
+  const o = d.options.find((x) => x.reply && typeof x.reply.dapai === 'string' && x.reply.dapai.endsWith('_'))
+  return o ? o.i : null
+}
+function maybeAuto() {
+  clearTimeout(autoTimer)
+  const d = decision, i = autoChoice(d)
+  if (i == null) return
+  autoTimer = setTimeout(() => { if (decision === d) act(i) }, 450) // 稍等一下，看得见牌落下
+}
+$('autoQieBtn').onclick = () => { sfx('select'); autoQie = !autoQie; store.set('riichi-auto-qie', autoQie ? 1 : 0); renderAutoBtns(); maybeAuto() }
+$('noCallBtn').onclick = () => { sfx('select'); noCall = !noCall; store.set('riichi-no-call', noCall ? 1 : 0); renderAutoBtns(); maybeAuto() }
+
 function renderEndBtn() {
+  renderAutoBtns()
   const me = lobby && lobby.seats.find((s) => s.id === mySeat)
   // 只有房主本人能结束整桌（联机时朋友本人也是真人座位，但不是房主）
   $('endBtn').hidden = !(seatToken && me && me.host && (roomStatus === 'playing' || roomStatus === 'lobby'))
@@ -1064,7 +1099,7 @@ function connect() {
     roomStatus = d.room.status
     eggs = d.eggs || []
     bgmFileCount = d.bgm || 0
-    renderLobby(); render(); renderDecision(); renderEndBtn(); renderSound(); tickClocks()
+    renderLobby(); render(); renderDecision(); renderEndBtn(); renderSound(); tickClocks(); maybeAuto()
     if (roomStatus === 'lobby' || roomStatus === 'playing') bgmStart(); else bgmStop(0.5)
     $('status').textContent = roomStatus === 'ended' || roomStatus === 'aborted' ? '这一桌结束了（还能聊天）' : ''
   })
@@ -1084,7 +1119,7 @@ function connect() {
     setView(d.view)
     if (d.decision) decision = d.decision
     if (d.decision && d.decision.options.some((o) => o.kind === 'hule')) sfx('canwin')
-    render(); renderDecision(); tickClocks()
+    render(); renderDecision(); tickClocks(); maybeAuto()
     const m = d.msg
     if (m.qipai) chatLine({ from: -1, kind: 'table', text: `${view.round} ${view.changbang}本场 开始` })
     if (m.dapai && m.dapai.p.includes('*')) chatLine({ from: -1, kind: 'table', text: `${nameAtL(m.dapai.l)?.name} 立直` })
