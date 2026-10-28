@@ -104,7 +104,8 @@ assert.equal(lines.length, 0, '出牌这一路不说话：假模型给了 say �
 const seat = room.players[0]
 assert.ok(sum.proxied >= 1, '连着两次失败要代打')
 assert.equal(seat.stats.takeovers, sum.proxied, '代打次数要对得上')
-assert.ok(room.chatLog.some((c) => c.kind === 'system' && c.text.includes('代打（回复解析不出来）')), '代打要在桌上写明')
+// 鸣牌窗口里代打的那手攒到这一局结束才写，写法不一样（不说是哪一手）
+assert.ok(room.chatLog.some((c) => c.kind === 'system' && c.text.includes('代打') && c.text.includes('回复解析不出来')), '代打要在桌上写明')
 // 10-29：给她会话那一半看的自己的牌：手牌 + 这一局出牌那一路最近几手和理由；聊天标着哪一局
 assert.ok(mid.self.includes('你现在的手牌（只有你看得到）：'), mid.self)
 assert.match(mid.self, /最近打的几手[\s\S]*（第\d+手的理由）/, mid.self)
