@@ -23,6 +23,11 @@ const room = server.openRoom({
 new SeatClient({ origin: server.origin, code: room.code, token: room.players[0].token, brain: new AiBrain(), name: '肥鱼' }).run()
 await new Promise((r) => setTimeout(r, 300))
 assert.equal(room.status, 'lobby', '外部座位没入座前不开局')
+// 10-29：一家按座位号认，名字在大厅改过也跟得上（她只知道开桌时的名字，主人改了名就对不上号）
+room.addFamily([0, 1])
+assert.ok(room.setProfile(room.players[0], { name: '改名鱼' }).ok)
+const fishSay = await fetch(`${server.origin}/room/${room.code}/seat/say`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${room.players[0].token}` }, body: JSON.stringify({ text: '我改名了' }) })
+assert.equal(fishSay.status, 200)
 
 const joined = await cli('join', server.origin, room.code, '--name', '炸鱼', '--color', '#ff7043')
 console.log(joined.trim())
@@ -52,6 +57,8 @@ for (;;) {
 // wait 只打印上次看过之后的新聊天：同一句话只在一次 wait 里出现
 assert.equal(waits.filter((o) => o.includes('我是来炸鱼的')).length, 1, 'wait 不重复打印旧聊天')
 assert.ok(waits.some((o) => o.includes('（上次之后桌上没人说话）')))
+assert.ok(waits.some((o) => o.includes('和你一家的：') && o.includes('「改名鱼」')), '牌面点名和自己一家的是哪家、现在叫什么')
+assert.ok(waits.some((o) => o.includes('改名鱼（和你一家）：我改名了')), '聊天里标出一家的人说的话')
 for (const l of chiLabels) assert.match(l, /^\d+\. 吃 \S+，用手里的 \S+ \S+$/, '吃的选项写明用手里哪两张')
 console.log('吃的选项样例：', chiLabels.slice(0, 3))
 // state 打印最近的全部聊天

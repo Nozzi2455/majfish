@@ -87,6 +87,11 @@ function boardText(view) {
   L.push('分数：' + order.map((s) => `${label(s)} ${s.defen}`).join(' | '))
   // 联机时谁和谁是一家（主人和自家肥鱼，插件登记的），公开信息
   if (view.families?.length) L.push('一家：' + view.families.map((f) => f.names.join(' + ')).join('；'))
+  // 自己在一家里就点名是哪家、现在叫什么（10-29 实测：主人在大厅改了名，她只知道开桌时的名字，对不上号）
+  const myId = view.seats.find((s) => s.l === me)?.id
+  const mine = view.families?.find((f) => f.members.includes(myId))
+  const mates = mine ? view.seats.filter((s) => s.id !== myId && mine.members.includes(s.id)) : []
+  if (mates.length) L.push(`和你一家的：${mates.map((s) => `${rel(s.l)}「${s.name}」`).join('、')}`)
   L.push('', '舍牌（按顺序；↓=摸切，没有↓=手切；【立直】=立直宣言牌）：')
   for (const s of order) L.push(`  ${label(s)}${s.lizhi ? '（已立直！）' : ''}：${river(s.he)}`)
   const melds = order.filter((s) => s.fulou.length).map((s) => `  ${label(s)}：${s.fulou.map((m) => m.name).join('；')}`)
@@ -101,8 +106,15 @@ function boardText(view) {
 const tingText = (t) => t.waits.map((w) => `${w.name}剩${w.left}`).join(' ') + (t.furiten ? '，振听（不能荣和）' : '')
 const optLine = (o) => `${o.i}. ${o.label}${o.ting ? `（打完听 ${tingText(o.ting)}）` : ''}`
 
-function chatText(chat, myName) {
-  return chat.map((c) => (c.from < 0 ? `  · ${c.text}` : `  ${c.name === myName ? '你' : c.name}${c.kind === 'line' ? '（出牌时）' : ''}：${c.text}`)).join('\n')
+// 最新的一家名单（服务端按座位号登记，名字是现在的）。谁是“你”、谁和你一家都按座位号认，不按名字：
+// 名字在大厅里随时能改（10-29 实测：主人改了名，她拿开桌时的名字对不上号）
+let families = []
+const noteFamilies = (x) => { if (x?.families) families = x.families }
+function chatText(chat, st) {
+  const mine = (c) => (st.seat != null ? c.from === st.seat : c.name === st.name)
+  const fam = families.find((f) => f.members.includes(st.seat))
+  const who = (c) => (mine(c) ? '你' : `${c.name}${fam?.members.includes(c.from) ? '（和你一家）' : ''}`)
+  return chat.map((c) => (c.from < 0 ? `  · ${c.text}` : `  ${who(c)}${c.kind === 'line' ? '（出牌时）' : ''}：${c.text}`)).join('\n')
 }
 
 /**
@@ -115,9 +127,9 @@ function printChat(st, chat, { onlyNew }) {
   if (onlyNew) {
     if (list.length) {
       const gap = seen && list[0].n > seen + 1 ? '（更早的省略了，state 能看最近的全部）\n' : ''
-      console.log(`上次之后桌上的新聊天（全桌都看得到）：\n${gap}${chatText(list, st.name)}\n`)
+      console.log(`上次之后桌上的新聊天（全桌都看得到）：\n${gap}${chatText(list, st)}\n`)
     } else console.log('（上次之后桌上没人说话）\n')
-  } else console.log(`桌上最近的聊天（全桌都看得到）：\n${list.length ? chatText(list, st.name) : '（桌上还没人说话）'}\n`)
+  } else console.log(`桌上最近的聊天（全桌都看得到）：\n${list.length ? chatText(list, st) : '（桌上还没人说话）'}\n`)
   const last = Math.max(seen, ...(chat || []).map((c) => c.n || 0))
   if (last !== seen) { st.chatSeen = last; save(st) }
 }
@@ -204,6 +216,7 @@ async function main() {
     if (status !== 200) die(`读不到（${status}）：${body.error || ''}`)
     if (body.left) console.log('你已经离桌了，这一桌由机器人接着打。')
     if (body.lobby?.status === 'lobby') return console.log('还在大厅等人准备：' + body.lobby.seats.map((s) => `${s.name}${s.ready ? '✓' : '…'}`).join(' '))
+    noteFamilies(body.lobby); noteFamilies(body.room); noteFamilies(body.view)
     printChat(st, body.chat, { onlyNew: false })
     if (body.view?.phase === 'playing') console.log(boardText(body.view))
     if (body.decision) { console.log('\n轮到你了：'); for (const o of body.decision.options) console.log(optLine(o)) }
@@ -269,6 +282,7 @@ async function main() {
       if (type === 'sync') {
         chat = d.chat || []
         view = d.view
+        noteFamilies(d.lobby); noteFamilies(d.room); noteFamilies(d.view)
         if (d.left) { console.log('你已经离桌了，这一桌由机器人接着打。'); return true }
         if (d.room.status === 'ended' || d.room.status === 'aborted') { printChat(st, chat, { onlyNew: true }); printEnd(d.room); return true }
         if (d.decision && view?.phase === 'playing') { printTurn(st, view, d.decision, chat); return true }
@@ -276,8 +290,11 @@ async function main() {
       } else if (type === 'chat') {
         chat.push(d)
         if (othersNew(d)) wakeOnChat()
+      } else if (type === 'lobby') {
+        noteFamilies(d)
       } else if (type === 'msg') {
         view = d.view
+        noteFamilies(d.view)
         if (d.decision) { printTurn(st, view, d.decision, chat); return true }
       } else if (type === 'end') {
         printChat(st, chat, { onlyNew: true })
