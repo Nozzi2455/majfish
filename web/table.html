@@ -649,16 +649,34 @@ function fadeTo(a, v, sec, done) {
     else a.volume = Math.max(0, Math.min(1, nv))
   }, 50)
 }
+// 联机时边下边放会出事（10-29 实测：UU 中转跟不上，流断了浏览器当歌放完，只循环开头几秒；另一首干脆没声）。
+// 所以拿到曲目单就先整首下到本地（blob），放的时候从本地放；没下完就等下完再放（那时还在这一局才放）。
+const eggBlobs = {}
+function loadEggs() {
+  for (const key of eggs) {
+    if (eggBlobs[key]) continue
+    eggBlobs[key] = fetch(`${base}egg/${key}?${seatToken ? 't=' + encodeURIComponent(seatToken) : 'w=' + encodeURIComponent(watchToken)}`)
+      .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() })
+      .then((b) => URL.createObjectURL(b))
+      .catch((err) => { console.warn('彩蛋下载失败', key, err); delete eggBlobs[key]; return null })
+  }
+}
 function playEgg(key) {
   if (muted || !eggOn || !eggs.includes(key)) return
   if (egg && (egg.key === key || egg.key === 'self')) return
   stopEgg(0.4)
-  const a = new Audio(`${base}egg/${key}?${seatToken ? 't=' + encodeURIComponent(seatToken) : 'w=' + encodeURIComponent(watchToken)}`)
+  const a = new Audio()
   a.loop = true
   a.volume = 0
-  a.play().then(() => fadeTo(a, 0.6 * sfxVol, 0.8)).catch(() => {}) // 页面还没点过时浏览器不让放，算了
-  egg = { key, a }
+  const mine = { key, a }
+  egg = mine
   bgmDuck(true)
+  loadEggs()
+  eggBlobs[key].then((src) => {
+    if (egg !== mine || !src) return // 下完时这一局已经结束了，或者下载失败
+    a.src = src
+    a.play().then(() => fadeTo(a, 0.6 * sfxVol, 0.8)).catch((err) => console.warn('彩蛋放不出来', key, err)) // 页面还没点过时浏览器不让放
+  })
 }
 function stopEgg(sec = 1.2) {
   if (!egg) return
@@ -1099,6 +1117,7 @@ function connect() {
     setView(d.view)
     roomStatus = d.room.status
     eggs = d.eggs || []
+    if (eggOn && !muted) loadEggs()
     bgmFileCount = d.bgm || 0
     renderLobby(); render(); renderDecision(); renderEndBtn(); renderSound(); tickClocks(); maybeAuto()
     if (roomStatus === 'lobby' || roomStatus === 'playing') bgmStart(); else bgmStop(0.5)
