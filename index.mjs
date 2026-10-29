@@ -512,7 +512,7 @@ export function apply(ctx) {
         // 两种 seat_mode 共用的返回开头：座位、主人、链接、风位、默认值
         const headLines = (table) => {
           const lines = [`入座了：房间 ${code}（${origin}，别人开的联机桌），你叫 ${j.name}，坐 ${j.seat} 号座位。`]
-          if (j.warning) lines.push(`注意：你的昵称没改成（${j.warning}），先用了 ${j.name}；开局前可以让主人在网页大厅里帮忙改，或者就用这个。`)
+          if (j.warning) lines.push(`注意：你的昵称没改成（${j.warning}），先用了 ${j.name}。你的名字入座后就改不了了（网页大厅只能改主人自己的）；想换的话，开局前用 riichi_close 离开房间，换个名字重新 riichi_join，不然就用这个。`)
           if (ownerPlays) {
             lines.push(`${ownerText(ownerSeat, table.names)}你们俩在桌上公开标成一家。`)
             if (j.owner.warning) lines.push(`注意：主人的昵称没改成（${j.owner.warning}），先用了 ${j.owner.name}；主人可以在网页大厅里自己改。`)
